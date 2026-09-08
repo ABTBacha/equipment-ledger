@@ -38,3 +38,16 @@ export const CreateReservationSchema = z.object({
   path: ['endAt'],
 });
 export type CreateReservationDto = z.infer<typeof CreateReservationSchema>;
+
+export const TakeOutOfServiceSchema = z.object({
+  occurredAt: z.string().datetime().optional(),
+  reason: z.string().min(1).optional(),
+  idempotencyKey: z.string().min(1),
+});
+export type TakeOutOfServiceDto = z.infer<typeof TakeOutOfServiceSchema>;
+
+export const BringBackIntoServiceSchema = z.object({
+  occurredAt: z.string().datetime().optional(),
+  idempotencyKey: z.string().min(1),
+});
+export type BringBackIntoServiceDto = z.infer<typeof BringBackIntoServiceSchema>;
