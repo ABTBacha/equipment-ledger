@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
-import { AssetStatus, IssueMovementDto, MovementType, ReservationStatus } from '@equipment-ledger/shared';
+import { AssetStatus, IssueMovementDto, MovementType, ReservationStatus, ReturnMovementDto } from '@equipment-ledger/shared';
 import { Asset } from '../schemas/asset.schema';
 import { Worker } from '../schemas/worker.schema';
 import { Movement } from '../schemas/movement.schema';
@@ -134,6 +134,104 @@ export class MovementsService {
         }
 
         return movement;
+      });
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  async return(dto: ReturnMovementDto): Promise<MovementResult> {
+    const occurredAt = dto.occurredAt ? new Date(dto.occurredAt) : new Date();
+
+    const { result } = await withIdempotency(this.movementModel, dto.idempotencyKey, () =>
+      this.withRetries(() => this.executeReturn(dto, occurredAt)),
+    );
+    return this.toMovementResult(result);
+  }
+
+  private async executeReturn(dto: ReturnMovementDto, occurredAt: Date): Promise<RawMovementDoc> {
+    const session = await this.connection.startSession();
+    try {
+      return await session.withTransaction(async () => {
+        const currentAsset = await this.assetModel.findById(dto.assetId, null, { session });
+        if (!currentAsset) throw new NotFoundException(`Asset ${dto.assetId} not found`);
+        if (currentAsset.status !== AssetStatus.ISSUED) {
+          throw new ConflictException(`Asset ${dto.assetId} is not currently issued (status: ${currentAsset.status})`);
+        }
+        if (currentAsset.currentHolderId !== dto.workerId) {
+          throw new ConflictException(
+            `Asset ${dto.assetId} is currently held by ${currentAsset.currentHolderId}, not ${dto.workerId}`,
+          );
+        }
+
+        const openMovement = currentAsset.currentMovementId
+          ? await this.movementModel.findById(currentAsset.currentMovementId, null, { session })
+          : null;
+        if (!openMovement) {
+          throw new ConflictException(`No open movement found for asset ${dto.assetId}`);
+        }
+        if (occurredAt.getTime() < openMovement.occurredAt.getTime()) {
+          throw new UnprocessableEntityException(
+            `Return time ${occurredAt.toISOString()} is before the issue time ${openMovement.occurredAt.toISOString()}`,
+          );
+        }
+
+        const newStatus = dto.outOfService ? AssetStatus.OUT_OF_SERVICE : AssetStatus.IN_STORE;
+        const updatedAsset = await this.assetModel.findOneAndUpdate(
+          { _id: dto.assetId, status: AssetStatus.ISSUED, currentHolderId: dto.workerId },
+          { $set: { status: newStatus, currentHolderId: null, currentMovementId: null, updatedAt: new Date() } },
+          { session, new: true },
+        );
+        if (!updatedAsset) {
+          // Same reasoning as executeIssue's CAS-miss branch above: two near-simultaneous
+          // return requests carrying the identical idempotencyKey (a double-click) are the
+          // same logical submission, not a genuine conflict — replay the earlier result
+          // instead of rejecting it. Deliberately not scoped to the current session for the
+          // same reason as above.
+          const existingMovement = await this.movementModel.findOne({ idempotencyKey: dto.idempotencyKey }).lean();
+          if (existingMovement) {
+            return existingMovement as RawMovementDoc;
+          }
+          throw new ConflictException(`Asset ${dto.assetId} changed concurrently; return not applied`);
+        }
+
+        const [returnMovement] = await this.movementModel.create(
+          [
+            {
+              assetId: dto.assetId,
+              workerId: dto.workerId,
+              type: MovementType.RETURN,
+              occurredAt,
+              recordedAt: new Date(),
+              idempotencyKey: dto.idempotencyKey,
+              correctionOf: null,
+              correctedBy: null,
+              reason: null,
+            },
+          ],
+          { session },
+        );
+
+        if (dto.outOfService) {
+          await this.movementModel.create(
+            [
+              {
+                assetId: dto.assetId,
+                workerId: dto.workerId,
+                type: MovementType.OUT_OF_SERVICE,
+                occurredAt,
+                recordedAt: new Date(),
+                idempotencyKey: `${dto.idempotencyKey}-oos`,
+                correctionOf: null,
+                correctedBy: null,
+                reason: 'Returned damaged',
+              },
+            ],
+            { session },
+          );
+        }
+
+        return returnMovement;
       });
     } finally {
       await session.endSession();
