@@ -21,6 +21,20 @@ describe('Mongoose schemas', () => {
     MovementModel = conn.model(Movement.name, MovementSchema);
     ReservationModel = conn.model(Reservation.name, ReservationSchema);
     AssetLockModel = conn.model(AssetLock.name, AssetLockSchema);
+
+    // Mongoose builds indexes (including unique indexes) asynchronously in the
+    // background after a model is created. Without waiting for that to finish,
+    // tests that rely on a unique-index violation can race ahead of the index
+    // build and see no violation at all. Model#init() resolves once a model's
+    // indexes are confirmed built, so awaiting it here makes index creation
+    // synchronous-in-effect before any assertion runs.
+    await Promise.all([
+      AssetModel.init(),
+      WorkerModel.init(),
+      MovementModel.init(),
+      ReservationModel.init(),
+      AssetLockModel.init(),
+    ]);
   });
 
   afterAll(async () => {
