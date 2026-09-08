@@ -153,6 +153,23 @@ export class MovementsService {
     const session = await this.connection.startSession();
     try {
       return await session.withTransaction(async () => {
+        // Checked first, on every attempt including retries after an abort: if this exact
+        // idempotencyKey has already succeeded (e.g. a concurrent request won a race and
+        // caused this attempt to abort-and-retry with a TransientTransactionError), replay its
+        // result instead of re-evaluating business rules against the now-already-changed
+        // state. This is what actually makes a genuine double-click safe here — unlike
+        // executeIssue, whose CAS write is its first operation, executeReturn has guard
+        // clauses (status/holder/backdate) before its CAS, so on retry-after-abort those
+        // guards would otherwise see the post-commit state and reject via the wrong guard
+        // (e.g. "not currently issued") instead of replaying. Deliberately not scoped to the
+        // current session for the same reason as executeIssue's CAS-miss lookup below: this
+        // transaction's snapshot may predate the winner's commit even though the winner has
+        // already committed by wall-clock time.
+        const existingMovement = await this.movementModel.findOne({ idempotencyKey: dto.idempotencyKey }).lean();
+        if (existingMovement) {
+          return existingMovement as RawMovementDoc;
+        }
+
         const currentAsset = await this.assetModel.findById(dto.assetId, null, { session });
         if (!currentAsset) throw new NotFoundException(`Asset ${dto.assetId} not found`);
         if (currentAsset.status !== AssetStatus.ISSUED) {
@@ -183,11 +200,12 @@ export class MovementsService {
           { session, new: true },
         );
         if (!updatedAsset) {
-          // Same reasoning as executeIssue's CAS-miss branch above: two near-simultaneous
-          // return requests carrying the identical idempotencyKey (a double-click) are the
-          // same logical submission, not a genuine conflict — replay the earlier result
-          // instead of rejecting it. Deliberately not scoped to the current session for the
-          // same reason as above.
+          // Secondary defense, kept in symmetry with executeIssue's CAS-miss branch: in
+          // practice, the top-of-transaction idempotencyKey check above is what actually
+          // catches a genuine double-click for return() (see its comment for why — the
+          // guard clauses above run before this CAS, so a retry-after-abort resolves there
+          // first). This lookup only matters for a CAS miss reached without an intervening
+          // abort/retry, which the guards above wouldn't have already caught.
           const existingMovement = await this.movementModel.findOne({ idempotencyKey: dto.idempotencyKey }).lean();
           if (existingMovement) {
             return existingMovement as RawMovementDoc;

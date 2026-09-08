@@ -100,7 +100,7 @@ describe('MovementsService.return', () => {
     expect(movements).toHaveLength(2);
   });
 
-  it('replays the winning movement instead of conflicting when this attempt\'s CAS write loses a same-idempotencyKey race (double-click)', async () => {
+  it('replays the same result instead of conflicting when two simultaneous return requests share the same idempotencyKey (double-click)', async () => {
     await issueDrill('DRILL-006', new Date('2026-08-01T09:00:00Z'));
     const dto = {
       assetId: 'DRILL-006',
@@ -108,54 +108,12 @@ describe('MovementsService.return', () => {
       occurredAt: '2026-08-01T17:00:00Z',
       idempotencyKey: 'ret-6',
     };
-
-    // A genuine timing race (Promise.all with two real service.return(dto) calls, with or
-    // without an artificial delay on the CAS write) does not reliably land on this branch:
-    // executeReturn reads-and-validates (status/holder/backdate) before its CAS write, unlike
-    // executeIssue where the CAS is the very first operation. Whichever call's snapshot began
-    // before the other committed hits a MongoDB write conflict on its own CAS attempt, which
-    // aborts the whole transaction with a TransientTransactionError; withTransaction/withRetries
-    // then re-run the *entire* executeReturn, and the retried pre-check sees the now-committed
-    // state and correctly rejects with "not currently issued" before ever reaching the CAS. So
-    // instead we simulate the narrow window the fallback exists for directly: the CAS predicate
-    // no longer matches (a concurrent request with the identical idempotencyKey has just won
-    // and committed) while this call's earlier pre-checks had already passed against the
-    // pre-race state.
-    let winningMovementId: string | undefined;
-    const spy = jest.spyOn(assetModel, 'findOneAndUpdate').mockImplementation((() => {
-      return (async () => {
-        const winner = await movementModel.create({
-          assetId: dto.assetId,
-          workerId: dto.workerId,
-          type: 'RETURN',
-          occurredAt: new Date(dto.occurredAt),
-          recordedAt: new Date(),
-          idempotencyKey: dto.idempotencyKey,
-          correctionOf: null,
-          correctedBy: null,
-          reason: null,
-        });
-        winningMovementId = winner._id.toString();
-        await assetModel.updateOne(
-          { _id: dto.assetId },
-          { $set: { status: AssetStatus.IN_STORE, currentHolderId: null, currentMovementId: null } },
-        );
-        return null;
-      })();
-    }) as unknown as typeof assetModel.findOneAndUpdate);
-
-    let result: Awaited<ReturnType<typeof service.return>>;
-    try {
-      result = await service.return(dto);
-    } finally {
-      spy.mockRestore();
-    }
-
-    expect(result._id).toBe(winningMovementId);
-    expect(result.type).toBe('RETURN');
+    const [a, b] = await Promise.all([service.return(dto), service.return(dto)]);
+    expect(a._id).toBe(b._id);
+    expect(a.type).toBe('RETURN');
     const asset = await assetModel.findById('DRILL-006').lean();
     expect(asset?.status).toBe(AssetStatus.IN_STORE);
-    const movements = await movementModel.find({ assetId: 'DRILL-006', type: 'RETURN' }).lean();
-    expect(movements).toHaveLength(1);
+    const count = await movementModel.countDocuments({ assetId: 'DRILL-006', type: 'RETURN' });
+    expect(count).toBe(1);
   });
 });
