@@ -1,0 +1,10 @@
+{
+  "name": "@equipment-ledger/shared",
+  "version": "0.0.1",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "echo \"(placeholder - populated in Task 2)\" && exit 0",
+    "test": "echo \"(placeholder - populated in Task 2)\" && exit 0"
+  }
+}
