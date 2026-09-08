@@ -1,5 +1,7 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Param, Post } from '@nestjs/common';
 import {
+  CorrectMovementDto,
+  CorrectMovementSchema,
   IssueMovementDto,
   IssueMovementSchema,
   ReturnMovementDto,
@@ -21,5 +23,11 @@ export class MovementsController {
   returnMovement(@Body() body: unknown) {
     const dto: ReturnMovementDto = ReturnMovementSchema.parse(body);
     return this.movementsService.return(dto);
+  }
+
+  @Post(':id/correct')
+  correct(@Param('id') id: string, @Body() body: unknown) {
+    const dto: CorrectMovementDto = CorrectMovementSchema.parse(body);
+    return this.movementsService.correct(id, dto);
   }
 }

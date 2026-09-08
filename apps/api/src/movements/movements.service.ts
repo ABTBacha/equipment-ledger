@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
-import { AssetStatus, IssueMovementDto, MovementType, ReservationStatus, ReturnMovementDto } from '@equipment-ledger/shared';
+import { AssetStatus, CorrectMovementDto, IssueMovementDto, MovementType, ReservationStatus, ReturnMovementDto } from '@equipment-ledger/shared';
 import { Asset } from '../schemas/asset.schema';
 import { Worker } from '../schemas/worker.schema';
 import { Movement } from '../schemas/movement.schema';
@@ -17,6 +17,7 @@ export interface MovementResult {
   occurredAt: Date;
   recordedAt: Date;
   idempotencyKey: string;
+  correctionOf: string | null;
 }
 
 /**
@@ -32,6 +33,7 @@ interface RawMovementDoc {
   occurredAt: Date;
   recordedAt: Date;
   idempotencyKey: string;
+  correctionOf: Types.ObjectId | string | null;
 }
 
 @Injectable()
@@ -89,6 +91,7 @@ export class MovementsService {
       occurredAt: doc.occurredAt,
       recordedAt: doc.recordedAt,
       idempotencyKey: doc.idempotencyKey,
+      correctionOf: doc.correctionOf ? doc.correctionOf.toString() : null,
     };
   }
 
@@ -264,6 +267,71 @@ export class MovementsService {
         }
 
         return returnMovement;
+      });
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  async correct(movementId: string, dto: CorrectMovementDto): Promise<MovementResult> {
+    const { result } = await withIdempotency(this.movementModel, dto.idempotencyKey, () =>
+      this.withRetries(() => this.executeCorrect(movementId, dto)),
+    );
+    return this.toMovementResult(result);
+  }
+
+  private async executeCorrect(movementId: string, dto: CorrectMovementDto): Promise<RawMovementDoc> {
+    const session = await this.connection.startSession();
+    try {
+      return await session.withTransaction(async () => {
+        if (!Types.ObjectId.isValid(movementId)) {
+          throw new NotFoundException(`Movement ${movementId} not found`);
+        }
+        const original = await this.movementModel.findById(movementId, null, { session });
+        if (!original) throw new NotFoundException(`Movement ${movementId} not found`);
+
+        // Claim the correction atomically: the filter requires correctedBy to still be
+        // null at the moment of the write, so two concurrent corrections of the same
+        // movement (different idempotencyKeys) can never both win — MongoDB serializes
+        // concurrent writes to the same document, so exactly one findOneAndUpdate here
+        // matches and the other necessarily observes correctedBy already set (either
+        // immediately, or after its transaction is aborted with a write conflict and
+        // retried by the driver). This mirrors the CAS pattern used for Asset.status in
+        // executeIssue/executeReturn: no read-then-write window exists between "check
+        // correctedBy is null" and "set it", because both happen in the single atomic
+        // findOneAndUpdate below.
+        const correctionId = new Types.ObjectId();
+        const claimed = await this.movementModel.findOneAndUpdate(
+          { _id: movementId, correctedBy: null },
+          { $set: { correctedBy: correctionId } },
+          { session, new: true },
+        );
+        if (!claimed) {
+          // Either a genuinely different correction already claimed this movement, or this
+          // is a double-click of the same submission racing itself — check before concluding
+          // it's a real conflict, same reasoning as executeReturn's guard branches.
+          return this.replayOrThrow(dto.idempotencyKey, () => new ConflictException(`Movement ${movementId} has already been corrected`));
+        }
+
+        const [correction] = await this.movementModel.create(
+          [
+            {
+              _id: correctionId,
+              assetId: original.assetId,
+              workerId: original.workerId,
+              type: original.type,
+              occurredAt: dto.occurredAt ? new Date(dto.occurredAt) : original.occurredAt,
+              recordedAt: new Date(),
+              idempotencyKey: dto.idempotencyKey,
+              correctionOf: original._id,
+              correctedBy: null,
+              reason: dto.reason ?? null,
+            },
+          ],
+          { session },
+        );
+
+        return correction;
       });
     } finally {
       await session.endSession();
