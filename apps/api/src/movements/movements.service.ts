@@ -63,6 +63,23 @@ export class MovementsService {
     return this.toMovementResult(result);
   }
 
+  /**
+   * If a movement with this exact idempotencyKey already exists, replay it instead of
+   * throwing — the "conflicting" state a guard just read may have been caused by our own
+   * request's earlier winner (a concurrent duplicate submission), not a genuine business-rule
+   * violation. This lookup is deliberately NOT scoped to the current transaction's session:
+   * the read that triggered the guard may have been served from a snapshot that predates the
+   * winner's commit, so a session-scoped read here could still see nothing even though the
+   * winner has already committed.
+   */
+  private async replayOrThrow(idempotencyKey: string, makeError: () => Error): Promise<RawMovementDoc> {
+    const existing = await this.movementModel.findOne({ idempotencyKey }).lean();
+    if (existing) {
+      return existing as RawMovementDoc;
+    }
+    throw makeError();
+  }
+
   private toMovementResult(doc: RawMovementDoc): MovementResult {
     return {
       _id: doc._id.toString(),
@@ -153,18 +170,13 @@ export class MovementsService {
     const session = await this.connection.startSession();
     try {
       return await session.withTransaction(async () => {
-        // Checked first, on every attempt including retries after an abort: if this exact
-        // idempotencyKey has already succeeded (e.g. a concurrent request won a race and
-        // caused this attempt to abort-and-retry with a TransientTransactionError), replay its
-        // result instead of re-evaluating business rules against the now-already-changed
-        // state. This is what actually makes a genuine double-click safe here — unlike
-        // executeIssue, whose CAS write is its first operation, executeReturn has guard
-        // clauses (status/holder/backdate) before its CAS, so on retry-after-abort those
-        // guards would otherwise see the post-commit state and reject via the wrong guard
-        // (e.g. "not currently issued") instead of replaying. Deliberately not scoped to the
-        // current session for the same reason as executeIssue's CAS-miss lookup below: this
-        // transaction's snapshot may predate the winner's commit even though the winner has
-        // already committed by wall-clock time.
+        // Cheap fast path, checked first on every attempt including retries after an abort: if
+        // this exact idempotencyKey has already succeeded, replay it instead of re-evaluating
+        // business rules against the now-already-changed state. This alone is NOT sufficient,
+        // though: the winner can commit in the gap between this read and the guard reads
+        // below, so every state-comparison guard below also falls back to the same replay
+        // check (via replayOrThrow) immediately before it would otherwise throw — see its
+        // doc comment for why that's airtight rather than merely narrowing the race window.
         const existingMovement = await this.movementModel.findOne({ idempotencyKey: dto.idempotencyKey }).lean();
         if (existingMovement) {
           return existingMovement as RawMovementDoc;
@@ -173,11 +185,15 @@ export class MovementsService {
         const currentAsset = await this.assetModel.findById(dto.assetId, null, { session });
         if (!currentAsset) throw new NotFoundException(`Asset ${dto.assetId} not found`);
         if (currentAsset.status !== AssetStatus.ISSUED) {
-          throw new ConflictException(`Asset ${dto.assetId} is not currently issued (status: ${currentAsset.status})`);
+          return this.replayOrThrow(dto.idempotencyKey, () =>
+            new ConflictException(`Asset ${dto.assetId} is not currently issued (status: ${currentAsset.status})`),
+          );
         }
         if (currentAsset.currentHolderId !== dto.workerId) {
-          throw new ConflictException(
-            `Asset ${dto.assetId} is currently held by ${currentAsset.currentHolderId}, not ${dto.workerId}`,
+          return this.replayOrThrow(dto.idempotencyKey, () =>
+            new ConflictException(
+              `Asset ${dto.assetId} is currently held by ${currentAsset.currentHolderId}, not ${dto.workerId}`,
+            ),
           );
         }
 
@@ -185,7 +201,7 @@ export class MovementsService {
           ? await this.movementModel.findById(currentAsset.currentMovementId, null, { session })
           : null;
         if (!openMovement) {
-          throw new ConflictException(`No open movement found for asset ${dto.assetId}`);
+          return this.replayOrThrow(dto.idempotencyKey, () => new ConflictException(`No open movement found for asset ${dto.assetId}`));
         }
         if (occurredAt.getTime() < openMovement.occurredAt.getTime()) {
           throw new UnprocessableEntityException(
@@ -200,17 +216,15 @@ export class MovementsService {
           { session, new: true },
         );
         if (!updatedAsset) {
-          // Secondary defense, kept in symmetry with executeIssue's CAS-miss branch: in
-          // practice, the top-of-transaction idempotencyKey check above is what actually
-          // catches a genuine double-click for return() (see its comment for why — the
-          // guard clauses above run before this CAS, so a retry-after-abort resolves there
-          // first). This lookup only matters for a CAS miss reached without an intervening
-          // abort/retry, which the guards above wouldn't have already caught.
-          const existingMovement = await this.movementModel.findOne({ idempotencyKey: dto.idempotencyKey }).lean();
-          if (existingMovement) {
-            return existingMovement as RawMovementDoc;
-          }
-          throw new ConflictException(`Asset ${dto.assetId} changed concurrently; return not applied`);
+          // Unreachable in the current read-then-CAS shape within a single attempt: anything
+          // that gets this far already passed the same-snapshot guards above (which now each
+          // fall back to replayOrThrow themselves), so a same-key winner would have already
+          // been caught there. Retained for symmetry with executeIssue's CAS-miss branch and
+          // as defense-in-depth if the guards above are ever reordered relative to this CAS.
+          return this.replayOrThrow(
+            dto.idempotencyKey,
+            () => new ConflictException(`Asset ${dto.assetId} changed concurrently; return not applied`),
+          );
         }
 
         const [returnMovement] = await this.movementModel.create(
