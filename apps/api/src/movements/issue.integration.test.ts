@@ -1,12 +1,13 @@
 import { Test } from '@nestjs/testing';
 import { getConnectionToken, getModelToken, MongooseModule } from '@nestjs/mongoose';
 import { Connection, Model } from 'mongoose';
-import { AssetStatus } from '@equipment-ledger/shared';
+import { AssetStatus, ReservationStatus } from '@equipment-ledger/shared';
 import { MovementsModule } from './movements.module';
 import { MovementsService } from './movements.service';
 import { Asset, AssetSchema } from '../schemas/asset.schema';
 import { Worker, WorkerSchema } from '../schemas/worker.schema';
 import { Movement, MovementSchema } from '../schemas/movement.schema';
+import { Reservation, ReservationSchema } from '../schemas/reservation.schema';
 
 describe('MovementsService.issue', () => {
   let service: MovementsService;
@@ -14,6 +15,7 @@ describe('MovementsService.issue', () => {
   let assetModel: Model<Asset>;
   let workerModel: Model<Worker>;
   let movementModel: Model<Movement>;
+  let reservationModel: Model<Reservation>;
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -23,6 +25,7 @@ describe('MovementsService.issue', () => {
           { name: Asset.name, schema: AssetSchema },
           { name: Worker.name, schema: WorkerSchema },
           { name: Movement.name, schema: MovementSchema },
+          { name: Reservation.name, schema: ReservationSchema },
         ]),
         MovementsModule,
       ],
@@ -33,6 +36,7 @@ describe('MovementsService.issue', () => {
     assetModel = moduleRef.get(getModelToken(Asset.name));
     workerModel = moduleRef.get(getModelToken(Worker.name));
     movementModel = moduleRef.get(getModelToken(Movement.name));
+    reservationModel = moduleRef.get(getModelToken(Reservation.name));
   });
 
   afterAll(async () => {
@@ -40,7 +44,12 @@ describe('MovementsService.issue', () => {
   });
 
   beforeEach(async () => {
-    await Promise.all([assetModel.deleteMany({}), workerModel.deleteMany({}), movementModel.deleteMany({})]);
+    await Promise.all([
+      assetModel.deleteMany({}),
+      workerModel.deleteMany({}),
+      movementModel.deleteMany({}),
+      reservationModel.deleteMany({}),
+    ]);
     await workerModel.create({ _id: 'worker-1', name: 'Ana Rios', certifications: [] });
     await workerModel.create({ _id: 'worker-2', name: 'Ben Cole', certifications: [{ code: 'GAS-DETECT', expiresAt: new Date('2020-01-01') }] });
   });
@@ -74,5 +83,56 @@ describe('MovementsService.issue', () => {
     expect(second._id).toBe(first._id);
     const count = await movementModel.countDocuments({ assetId: 'DRILL-003' });
     expect(count).toBe(1);
+  });
+
+  it('replays the same result instead of conflicting when two simultaneous requests share the same idempotencyKey (double-click)', async () => {
+    await assetModel.create({ _id: 'DRILL-004', kind: 'drill', requiresCertification: null });
+    const [a, b] = await Promise.all([
+      service.issue({ assetId: 'DRILL-004', workerId: 'worker-1', idempotencyKey: 'dup-key' }),
+      service.issue({ assetId: 'DRILL-004', workerId: 'worker-1', idempotencyKey: 'dup-key' }),
+    ]);
+    expect(a._id).toBe(b._id);
+    const count = await movementModel.countDocuments({ assetId: 'DRILL-004' });
+    expect(count).toBe(1);
+  });
+
+  it('marks an ACTIVE reservation as FULFILLED when it is supplied on issue', async () => {
+    await assetModel.create({ _id: 'DRILL-005', kind: 'drill', requiresCertification: null });
+    const reservation = await reservationModel.create({
+      assetId: 'DRILL-005',
+      workerId: 'worker-1',
+      startAt: new Date('2026-01-01T00:00:00Z'),
+      endAt: new Date('2026-01-01T01:00:00Z'),
+      status: ReservationStatus.ACTIVE,
+      idempotencyKey: 'reservation-k1',
+    });
+    await service.issue({
+      assetId: 'DRILL-005',
+      workerId: 'worker-1',
+      idempotencyKey: 'k6',
+      reservationId: reservation._id.toString(),
+    });
+    const updated = await reservationModel.findById(reservation._id).lean();
+    expect(updated?.status).toBe(ReservationStatus.FULFILLED);
+  });
+
+  it('leaves a non-ACTIVE reservation untouched when it is supplied on issue', async () => {
+    await assetModel.create({ _id: 'DRILL-006', kind: 'drill', requiresCertification: null });
+    const reservation = await reservationModel.create({
+      assetId: 'DRILL-006',
+      workerId: 'worker-1',
+      startAt: new Date('2026-01-01T00:00:00Z'),
+      endAt: new Date('2026-01-01T01:00:00Z'),
+      status: ReservationStatus.CANCELLED,
+      idempotencyKey: 'reservation-k2',
+    });
+    await service.issue({
+      assetId: 'DRILL-006',
+      workerId: 'worker-1',
+      idempotencyKey: 'k7',
+      reservationId: reservation._id.toString(),
+    });
+    const updated = await reservationModel.findById(reservation._id).lean();
+    expect(updated?.status).toBe(ReservationStatus.CANCELLED);
   });
 });

@@ -19,6 +19,21 @@ export interface MovementResult {
   idempotencyKey: string;
 }
 
+/**
+ * The shape actually produced by `executeIssue` and by a raw `.lean()` read of a
+ * Movement document — `_id` is a Mongoose ObjectId here, not yet normalized to a
+ * string. Only `toMovementResult`'s return value may be typed `MovementResult`.
+ */
+interface RawMovementDoc {
+  _id: Types.ObjectId | string;
+  assetId: string;
+  workerId: string | null;
+  type: MovementType;
+  occurredAt: Date;
+  recordedAt: Date;
+  idempotencyKey: string;
+}
+
 @Injectable()
 export class MovementsService {
   constructor(
@@ -48,7 +63,7 @@ export class MovementsService {
     return this.toMovementResult(result);
   }
 
-  private toMovementResult(doc: any): MovementResult {
+  private toMovementResult(doc: RawMovementDoc): MovementResult {
     return {
       _id: doc._id.toString(),
       assetId: doc.assetId,
@@ -60,7 +75,7 @@ export class MovementsService {
     };
   }
 
-  private async executeIssue(dto: IssueMovementDto, occurredAt: Date): Promise<MovementResult> {
+  private async executeIssue(dto: IssueMovementDto, occurredAt: Date): Promise<RawMovementDoc> {
     const session = await this.connection.startSession();
     try {
       return await session.withTransaction(async () => {
@@ -78,6 +93,17 @@ export class MovementsService {
           { session, new: true },
         );
         if (!updatedAsset) {
+          // Another request may have won the CAS a moment ago carrying the exact same
+          // idempotencyKey (e.g. a double-click submitting the same request twice). That
+          // is not a genuine conflict — it's the same logical submission — so replay its
+          // result instead of rejecting it. This lookup is deliberately NOT scoped to the
+          // current transaction's session: our transaction's snapshot may have been
+          // established before the winner committed, so a session-scoped read here could
+          // still see nothing even though the winner has already committed.
+          const existingMovement = await this.movementModel.findOne({ idempotencyKey: dto.idempotencyKey }).lean();
+          if (existingMovement) {
+            return existingMovement as RawMovementDoc;
+          }
           throw new ConflictException(`Asset ${dto.assetId} is not available to issue`);
         }
 
@@ -107,7 +133,7 @@ export class MovementsService {
           );
         }
 
-        return movement.toObject() as unknown as MovementResult;
+        return movement;
       });
     } finally {
       await session.endSession();
