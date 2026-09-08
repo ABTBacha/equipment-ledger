@@ -7,6 +7,7 @@ import { Reservation } from '../schemas/reservation.schema';
 import { AssetLock } from '../schemas/asset-lock.schema';
 import { intervalsOverlap } from '../domain/intervals';
 import { withIdempotency, replayOrThrow } from '../domain/idempotency';
+import { withRetries } from '../domain/retry';
 
 export interface ReservationResult {
   _id: string;
@@ -54,7 +55,7 @@ export class ReservationsService {
     }
 
     const { result } = await withIdempotency(this.reservationModel, dto.idempotencyKey, () =>
-      this.withRetries(() => this.executeReserve(dto, startAt, endAt)),
+      withRetries(() => this.executeReserve(dto, startAt, endAt)),
     );
     return this.toReservationResult(result);
   }
@@ -83,10 +84,16 @@ export class ReservationsService {
         const asset = await this.assetModel.findById(dto.assetId, null, { session });
         if (!asset) throw new NotFoundException(`Asset ${dto.assetId} not found`);
         if (asset.status === AssetStatus.OUT_OF_SERVICE) {
-          // Not a race artifact: an asset's status doesn't flip to OUT_OF_SERVICE as a
-          // side effect of a concurrent reservation request, so there is no "our own
-          // winner changed this" case to replay here — this is a genuine business-rule
-          // rejection every time.
+          // Not a replay candidate: this branch is about causality, not about whether
+          // concurrent OUT_OF_SERVICE flips can happen (they can — see the AssetLock bump
+          // below, which exists precisely to serialize against a concurrent
+          // takeOutOfService()/return(outOfService) call). The point is that reserve()
+          // itself can never be the one that causes the flip to OUT_OF_SERVICE — only
+          // AssetsService.takeOutOfService/bringBackIntoService and
+          // MovementsService.return(outOfService:true) write Asset.status — so there is
+          // no "our own winner changed this" case for THIS call to replay here: whatever
+          // set this status, it wasn't a duplicate submission of this reserve() request,
+          // so this is a genuine business-rule rejection every time.
           throw new ConflictException(`Asset ${dto.assetId} is out of service and cannot be reserved`);
         }
 
@@ -135,19 +142,5 @@ export class ReservationsService {
     } finally {
       await session.endSession();
     }
-  }
-
-  private async withRetries<T>(fn: () => Promise<T>, attempts = 5): Promise<T> {
-    let lastErr: unknown;
-    for (let i = 0; i < attempts; i++) {
-      try {
-        return await fn();
-      } catch (err: any) {
-        lastErr = err;
-        if (err?.hasErrorLabel?.('TransientTransactionError') && i < attempts - 1) continue;
-        throw err;
-      }
-    }
-    throw lastErr;
   }
 }

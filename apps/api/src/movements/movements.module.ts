@@ -4,6 +4,7 @@ import { Asset, AssetSchema } from '../schemas/asset.schema';
 import { Worker, WorkerSchema } from '../schemas/worker.schema';
 import { Movement, MovementSchema } from '../schemas/movement.schema';
 import { Reservation, ReservationSchema } from '../schemas/reservation.schema';
+import { AssetLock, AssetLockSchema } from '../schemas/asset-lock.schema';
 import { MovementsService } from './movements.service';
 import { MovementsController } from './movements.controller';
 
@@ -14,6 +15,7 @@ import { MovementsController } from './movements.controller';
       { name: Worker.name, schema: WorkerSchema },
       { name: Movement.name, schema: MovementSchema },
       { name: Reservation.name, schema: ReservationSchema },
+      { name: AssetLock.name, schema: AssetLockSchema },
     ]),
   ],
   providers: [MovementsService],

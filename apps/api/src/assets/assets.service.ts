@@ -7,6 +7,7 @@ import { Movement } from '../schemas/movement.schema';
 import { Reservation } from '../schemas/reservation.schema';
 import { AssetLock } from '../schemas/asset-lock.schema';
 import { withIdempotency, findReplayIfExists, replayOrThrow } from '../domain/idempotency';
+import { withRetries } from '../domain/retry';
 import { MovementResult, RawMovementDoc, toMovementResult } from '../movements/movement-result';
 import { MovementsService } from '../movements/movements.service';
 
@@ -55,7 +56,7 @@ export class AssetsService {
 
     const occurredAt = dto.occurredAt ? new Date(dto.occurredAt) : new Date();
     const { result } = await withIdempotency(this.movementModel, dto.idempotencyKey, () =>
-      this.withRetries(() => this.executeTakeOutOfServiceInStore(assetId, occurredAt, dto.reason ?? null, dto.idempotencyKey)),
+      withRetries(() => this.executeTakeOutOfServiceInStore(assetId, occurredAt, dto.reason ?? null, dto.idempotencyKey)),
     );
     return toMovementResult(result);
   }
@@ -136,7 +137,7 @@ export class AssetsService {
   async bringBackIntoService(assetId: string, dto: BringBackIntoServiceDto): Promise<MovementResult> {
     const occurredAt = dto.occurredAt ? new Date(dto.occurredAt) : new Date();
     const { result } = await withIdempotency(this.movementModel, dto.idempotencyKey, () =>
-      this.withRetries(() => this.executeBringBackIntoService(assetId, occurredAt, dto.idempotencyKey)),
+      withRetries(() => this.executeBringBackIntoService(assetId, occurredAt, dto.idempotencyKey)),
     );
     return toMovementResult(result);
   }
@@ -186,19 +187,5 @@ export class AssetsService {
     } finally {
       await session.endSession();
     }
-  }
-
-  private async withRetries<T>(fn: () => Promise<T>, attempts = 5): Promise<T> {
-    let lastErr: unknown;
-    for (let i = 0; i < attempts; i++) {
-      try {
-        return await fn();
-      } catch (err: any) {
-        lastErr = err;
-        if (err?.hasErrorLabel?.('TransientTransactionError') && i < attempts - 1) continue;
-        throw err;
-      }
-    }
-    throw lastErr;
   }
 }

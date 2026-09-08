@@ -6,8 +6,10 @@ import { Asset } from '../schemas/asset.schema';
 import { Worker } from '../schemas/worker.schema';
 import { Movement } from '../schemas/movement.schema';
 import { Reservation } from '../schemas/reservation.schema';
+import { AssetLock } from '../schemas/asset-lock.schema';
 import { checkCertification } from '../domain/certification';
 import { withIdempotency, replayOrThrow } from '../domain/idempotency';
+import { withRetries } from '../domain/retry';
 import { MovementResult, RawMovementDoc, toMovementResult } from './movement-result';
 
 @Injectable()
@@ -17,6 +19,7 @@ export class MovementsService {
     @InjectModel(Worker.name) private readonly workerModel: Model<Worker>,
     @InjectModel(Movement.name) private readonly movementModel: Model<Movement>,
     @InjectModel(Reservation.name) private readonly reservationModel: Model<Reservation>,
+    @InjectModel(AssetLock.name) private readonly assetLockModel: Model<AssetLock>,
     @InjectConnection() private readonly connection: Connection,
   ) {}
 
@@ -34,7 +37,7 @@ export class MovementsService {
     }
 
     const { result } = await withIdempotency(this.movementModel, dto.idempotencyKey, () =>
-      this.withRetries(() => this.executeIssue(dto, occurredAt)),
+      withRetries(() => this.executeIssue(dto, occurredAt)),
     );
     return toMovementResult(result);
   }
@@ -108,7 +111,7 @@ export class MovementsService {
     const occurredAt = dto.occurredAt ? new Date(dto.occurredAt) : new Date();
 
     const { result } = await withIdempotency(this.movementModel, dto.idempotencyKey, () =>
-      this.withRetries(() => this.executeReturn(dto, occurredAt)),
+      withRetries(() => this.executeReturn(dto, occurredAt)),
     );
     return toMovementResult(result);
   }
@@ -193,6 +196,33 @@ export class MovementsService {
         );
 
         if (dto.outOfService) {
+          // Same invariant AssetsService.executeTakeOutOfServiceInStore protects for the
+          // IN_STORE path: an asset must never end up OUT_OF_SERVICE while an ACTIVE
+          // reservation for it still stands, and a concurrent reserve() for this asset
+          // must never be able to interleave past this transaction undetected. This
+          // status flip is the ISSUED-path equivalent of that same transition, so it
+          // needs the identical two pieces:
+          //
+          // 1. Cancel any standing ACTIVE reservations, atomically with the status flip.
+          // 2. Bump the same per-asset AssetLock document reserve() bumps, so that a
+          //    concurrent reserve() for this asset is forced to write-conflict against
+          //    this transaction (both now write AssetLock) instead of being able to
+          //    commit independently — without this, reserve() only reads Asset and never
+          //    writes to it, so there would be nothing here for MongoDB's write-conflict
+          //    detection to catch, and a reservation could land on an asset that just
+          //    (from this transaction's perspective) went out of service.
+          await this.assetLockModel.findOneAndUpdate(
+            { _id: dto.assetId },
+            { $inc: { nonce: 1 } },
+            { session, upsert: true, new: true },
+          );
+
+          await this.reservationModel.updateMany(
+            { assetId: dto.assetId, status: ReservationStatus.ACTIVE },
+            { $set: { status: ReservationStatus.CANCELLED, cancelReason: 'Asset taken out of service' } },
+            { session },
+          );
+
           await this.movementModel.create(
             [
               {
@@ -220,7 +250,7 @@ export class MovementsService {
 
   async correct(movementId: string, dto: CorrectMovementDto): Promise<MovementResult> {
     const { result } = await withIdempotency(this.movementModel, dto.idempotencyKey, () =>
-      this.withRetries(() => this.executeCorrect(movementId, dto)),
+      withRetries(() => this.executeCorrect(movementId, dto)),
     );
     return toMovementResult(result);
   }
@@ -281,19 +311,5 @@ export class MovementsService {
     } finally {
       await session.endSession();
     }
-  }
-
-  private async withRetries<T>(fn: () => Promise<T>, attempts = 5): Promise<T> {
-    let lastErr: unknown;
-    for (let i = 0; i < attempts; i++) {
-      try {
-        return await fn();
-      } catch (err: any) {
-        lastErr = err;
-        if (err?.hasErrorLabel?.('TransientTransactionError') && i < attempts - 1) continue;
-        throw err;
-      }
-    }
-    throw lastErr;
   }
 }

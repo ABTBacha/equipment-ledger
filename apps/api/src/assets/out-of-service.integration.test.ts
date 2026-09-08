@@ -21,6 +21,7 @@ describe('AssetsService out-of-service transitions', () => {
   let workerModel: Model<Worker>;
   let movementModel: Model<Movement>;
   let reservationModel: Model<Reservation>;
+  let assetLockModel: Model<AssetLock>;
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -46,6 +47,7 @@ describe('AssetsService out-of-service transitions', () => {
     workerModel = moduleRef.get(getModelToken(Worker.name));
     movementModel = moduleRef.get(getModelToken(Movement.name));
     reservationModel = moduleRef.get(getModelToken(Reservation.name));
+    assetLockModel = moduleRef.get(getModelToken(AssetLock.name));
   });
 
   afterAll(async () => {
@@ -58,6 +60,7 @@ describe('AssetsService out-of-service transitions', () => {
       workerModel.deleteMany({}),
       movementModel.deleteMany({}),
       reservationModel.deleteMany({}),
+      assetLockModel.deleteMany({}),
     ]);
     await workerModel.create({ _id: 'worker-1', name: 'Ana Rios', certifications: [] });
   });
@@ -123,8 +126,6 @@ describe('AssetsService out-of-service transitions', () => {
     ]);
 
     expect(a._id).toBe(b._id);
-    const count = await movementModel.countDocuments({ assetId: 'DRILL-006', type: AssetStatus.OUT_OF_SERVICE });
-    expect(count).toBe(1);
     const oosCount = await movementModel.countDocuments({ assetId: 'DRILL-006', type: 'OUT_OF_SERVICE' });
     expect(oosCount).toBe(1);
     const asset = await assetModel.findById('DRILL-006').lean();
@@ -150,7 +151,11 @@ describe('AssetsService out-of-service transitions', () => {
   it('never leaves an active reservation on an asset that ends up out of service, regardless of which of a concurrent reserve()/takeOutOfService() wins', async () => {
     await assetModel.create({ _id: 'DRILL-008', kind: 'drill', requiresCertification: null });
 
-    const [oosResult, reserveResult] = await Promise.allSettled([
+    // Both may succeed independently (takeOutOfService always wins its own CAS on a
+    // fresh IN_STORE asset, and reserve() may or may not have raced past it) — the
+    // outcome of each individual call is deliberately not asserted on; only the end
+    // state matters.
+    await Promise.allSettled([
       service.takeOutOfService('DRILL-008', { reason: 'Concurrent test', idempotencyKey: 'oos-race-1' }),
       reservationsService.reserve({
         assetId: 'DRILL-008',
@@ -161,16 +166,48 @@ describe('AssetsService out-of-service transitions', () => {
       }),
     ]);
 
-    // Both may succeed independently (takeOutOfService always wins its own CAS on a
-    // fresh IN_STORE asset, and reserve() may or may not have raced past it) — the
-    // outcome of each individual call is not the point; the end state is.
-    expect(['fulfilled', 'rejected']).toContain(oosResult.status);
-    expect(['fulfilled', 'rejected']).toContain(reserveResult.status);
-
     const asset = await assetModel.findById('DRILL-008').lean();
     expect(asset?.status).toBe(AssetStatus.OUT_OF_SERVICE);
 
     const activeReservations = await reservationModel.countDocuments({ assetId: 'DRILL-008', status: ReservationStatus.ACTIVE });
+    expect(activeReservations).toBe(0);
+  });
+
+  it('never leaves an active reservation on an asset that ends up out of service via the ISSUED path, regardless of which of a concurrent reserve()/takeOutOfService() wins', async () => {
+    await assetModel.create({ _id: 'DRILL-009', kind: 'drill', requiresCertification: null, status: AssetStatus.ISSUED, currentHolderId: 'worker-1' });
+    const [openMovement] = await movementModel.create([
+      { assetId: 'DRILL-009', workerId: 'worker-1', type: 'ISSUE', occurredAt: new Date('2026-08-01T09:00:00Z'), recordedAt: new Date('2026-08-01T09:00:00Z'), idempotencyKey: 'oos-issue-9' },
+    ]);
+    await assetModel.updateOne({ _id: 'DRILL-009' }, { $set: { currentMovementId: String(openMovement._id) } });
+    // Standing ACTIVE reservation for a future window, exactly like reserve() itself
+    // would create — reserving a future window on a currently-ISSUED asset is allowed
+    // (reserve() only rejects OUT_OF_SERVICE), so this is realistic pre-existing state.
+    await reservationModel.create({
+      assetId: 'DRILL-009',
+      workerId: 'worker-1',
+      startAt: new Date('2027-06-01T09:00:00Z'),
+      endAt: new Date('2027-06-01T17:00:00Z'),
+      idempotencyKey: 'res-standing-9',
+    });
+
+    // Both may succeed independently — the outcome of each individual call is not the
+    // point; the end state is (see the IN_STORE-path race test above for the same
+    // reasoning).
+    await Promise.allSettled([
+      service.takeOutOfService('DRILL-009', { occurredAt: '2026-08-01T17:00:00Z', reason: 'Concurrent ISSUED test', idempotencyKey: 'oos-race-9' }),
+      reservationsService.reserve({
+        assetId: 'DRILL-009',
+        workerId: 'worker-1',
+        startAt: '2027-07-01T09:00:00Z',
+        endAt: '2027-07-01T17:00:00Z',
+        idempotencyKey: 'reserve-race-9',
+      }),
+    ]);
+
+    const asset = await assetModel.findById('DRILL-009').lean();
+    expect(asset?.status).toBe(AssetStatus.OUT_OF_SERVICE);
+
+    const activeReservations = await reservationModel.countDocuments({ assetId: 'DRILL-009', status: ReservationStatus.ACTIVE });
     expect(activeReservations).toBe(0);
   });
 });
