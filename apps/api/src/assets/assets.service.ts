@@ -11,6 +11,20 @@ import { withRetries } from '../domain/retry';
 import { MovementResult, RawMovementDoc, toMovementResult } from '../movements/movement-result';
 import { MovementsService } from '../movements/movements.service';
 
+export interface AssetSummary {
+  _id: string;
+  kind: string;
+  requiresCertification: string | null;
+  status: AssetStatus;
+  currentHolderId: string | null;
+  upcomingReservation: { startAt: Date; endAt: Date; workerId: string } | null;
+}
+
+export interface HistoryEntry {
+  movement: MovementResult;
+  correction: MovementResult | null;
+}
+
 @Injectable()
 export class AssetsService {
   constructor(
@@ -187,5 +201,57 @@ export class AssetsService {
     } finally {
       await session.endSession();
     }
+  }
+
+  async findAll(): Promise<AssetSummary[]> {
+    const assets = await this.assetModel.find({}).lean();
+    const now = new Date();
+    const activeReservations = await this.reservationModel
+      .find({ status: ReservationStatus.ACTIVE, endAt: { $gte: now } })
+      .sort({ startAt: 1 })
+      .lean();
+
+    const nearestByAsset = new Map<string, (typeof activeReservations)[number]>();
+    for (const r of activeReservations) {
+      if (!nearestByAsset.has(r.assetId)) nearestByAsset.set(r.assetId, r);
+    }
+
+    return assets.map((a) => {
+      const nearest = nearestByAsset.get(a._id);
+      return {
+        _id: a._id,
+        kind: a.kind,
+        requiresCertification: a.requiresCertification,
+        status: a.status,
+        currentHolderId: a.currentHolderId,
+        upcomingReservation: nearest ? { startAt: nearest.startAt, endAt: nearest.endAt, workerId: nearest.workerId } : null,
+      };
+    });
+  }
+
+  async findOne(id: string): Promise<AssetSummary> {
+    const all = await this.findAll();
+    const found = all.find((a) => a._id === id);
+    if (!found) throw new NotFoundException(`Asset ${id} not found`);
+    return found;
+  }
+
+  async getHistory(assetId: string): Promise<HistoryEntry[]> {
+    const asset = await this.assetModel.findById(assetId).lean();
+    if (!asset) throw new NotFoundException(`Asset ${assetId} not found`);
+
+    const movements = await this.movementModel.find({ assetId }).sort({ recordedAt: 1 }).lean();
+    const byId = new Map(movements.map((m) => [String(m._id), m]));
+
+    const entries: HistoryEntry[] = [];
+    for (const m of movements) {
+      if (m.correctionOf) continue;
+      const correction = m.correctedBy ? byId.get(String(m.correctedBy)) : undefined;
+      entries.push({
+        movement: toMovementResult(m as RawMovementDoc),
+        correction: correction ? toMovementResult(correction as RawMovementDoc) : null,
+      });
+    }
+    return entries;
   }
 }

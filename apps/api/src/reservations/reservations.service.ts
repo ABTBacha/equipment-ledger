@@ -1,6 +1,6 @@
 import { ConflictException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
-import { Connection, Model, Types } from 'mongoose';
+import { Connection, Model } from 'mongoose';
 import { AssetStatus, CreateReservationDto, ReservationStatus } from '@equipment-ledger/shared';
 import { Asset } from '../schemas/asset.schema';
 import { Reservation } from '../schemas/reservation.schema';
@@ -8,31 +8,7 @@ import { AssetLock } from '../schemas/asset-lock.schema';
 import { intervalsOverlap } from '../domain/intervals';
 import { withIdempotency, replayOrThrow } from '../domain/idempotency';
 import { withRetries } from '../domain/retry';
-
-export interface ReservationResult {
-  _id: string;
-  assetId: string;
-  workerId: string;
-  startAt: Date;
-  endAt: Date;
-  status: ReservationStatus;
-  idempotencyKey: string;
-}
-
-/**
- * The shape actually produced by `executeReserve` and by a raw `.lean()` read of a
- * Reservation document — `_id` is a Mongoose ObjectId here, not yet normalized to a
- * string. Only `toReservationResult`'s return value may be typed `ReservationResult`.
- */
-interface RawReservationDoc {
-  _id: Types.ObjectId | string;
-  assetId: string;
-  workerId: string;
-  startAt: Date;
-  endAt: Date;
-  status: ReservationStatus;
-  idempotencyKey: string;
-}
+import { ReservationResult, RawReservationDoc, toReservationResult } from './reservation-result';
 
 @Injectable()
 export class ReservationsService {
@@ -57,24 +33,12 @@ export class ReservationsService {
     const { result } = await withIdempotency(this.reservationModel, dto.idempotencyKey, () =>
       withRetries(() => this.executeReserve(dto, startAt, endAt)),
     );
-    return this.toReservationResult(result);
+    return toReservationResult(result);
   }
 
   async findAll(): Promise<ReservationResult[]> {
     const docs = await this.reservationModel.find({}).lean();
-    return (docs as unknown as RawReservationDoc[]).map((doc) => this.toReservationResult(doc));
-  }
-
-  private toReservationResult(doc: RawReservationDoc): ReservationResult {
-    return {
-      _id: doc._id.toString(),
-      assetId: doc.assetId,
-      workerId: doc.workerId,
-      startAt: doc.startAt,
-      endAt: doc.endAt,
-      status: doc.status,
-      idempotencyKey: doc.idempotencyKey,
-    };
+    return (docs as unknown as RawReservationDoc[]).map((doc) => toReservationResult(doc));
   }
 
   private async executeReserve(dto: CreateReservationDto, startAt: Date, endAt: Date): Promise<RawReservationDoc> {
