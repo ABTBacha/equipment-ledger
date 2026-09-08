@@ -7,34 +7,8 @@ import { Worker } from '../schemas/worker.schema';
 import { Movement } from '../schemas/movement.schema';
 import { Reservation } from '../schemas/reservation.schema';
 import { checkCertification } from '../domain/certification';
-import { withIdempotency } from '../domain/idempotency';
-
-export interface MovementResult {
-  _id: string;
-  assetId: string;
-  workerId: string | null;
-  type: MovementType;
-  occurredAt: Date;
-  recordedAt: Date;
-  idempotencyKey: string;
-  correctionOf: string | null;
-}
-
-/**
- * The shape actually produced by `executeIssue` and by a raw `.lean()` read of a
- * Movement document — `_id` is a Mongoose ObjectId here, not yet normalized to a
- * string. Only `toMovementResult`'s return value may be typed `MovementResult`.
- */
-interface RawMovementDoc {
-  _id: Types.ObjectId | string;
-  assetId: string;
-  workerId: string | null;
-  type: MovementType;
-  occurredAt: Date;
-  recordedAt: Date;
-  idempotencyKey: string;
-  correctionOf: Types.ObjectId | string | null;
-}
+import { withIdempotency, replayOrThrow } from '../domain/idempotency';
+import { MovementResult, RawMovementDoc, toMovementResult } from './movement-result';
 
 @Injectable()
 export class MovementsService {
@@ -62,37 +36,7 @@ export class MovementsService {
     const { result } = await withIdempotency(this.movementModel, dto.idempotencyKey, () =>
       this.withRetries(() => this.executeIssue(dto, occurredAt)),
     );
-    return this.toMovementResult(result);
-  }
-
-  /**
-   * If a movement with this exact idempotencyKey already exists, replay it instead of
-   * throwing — the "conflicting" state a guard just read may have been caused by our own
-   * request's earlier winner (a concurrent duplicate submission), not a genuine business-rule
-   * violation. This lookup is deliberately NOT scoped to the current transaction's session:
-   * the read that triggered the guard may have been served from a snapshot that predates the
-   * winner's commit, so a session-scoped read here could still see nothing even though the
-   * winner has already committed.
-   */
-  private async replayOrThrow(idempotencyKey: string, makeError: () => Error): Promise<RawMovementDoc> {
-    const existing = await this.movementModel.findOne({ idempotencyKey }).lean();
-    if (existing) {
-      return existing as RawMovementDoc;
-    }
-    throw makeError();
-  }
-
-  private toMovementResult(doc: RawMovementDoc): MovementResult {
-    return {
-      _id: doc._id.toString(),
-      assetId: doc.assetId,
-      workerId: doc.workerId,
-      type: doc.type,
-      occurredAt: doc.occurredAt,
-      recordedAt: doc.recordedAt,
-      idempotencyKey: doc.idempotencyKey,
-      correctionOf: doc.correctionOf ? doc.correctionOf.toString() : null,
-    };
+    return toMovementResult(result);
   }
 
   private async executeIssue(dto: IssueMovementDto, occurredAt: Date): Promise<RawMovementDoc> {
@@ -166,7 +110,7 @@ export class MovementsService {
     const { result } = await withIdempotency(this.movementModel, dto.idempotencyKey, () =>
       this.withRetries(() => this.executeReturn(dto, occurredAt)),
     );
-    return this.toMovementResult(result);
+    return toMovementResult(result);
   }
 
   private async executeReturn(dto: ReturnMovementDto, occurredAt: Date): Promise<RawMovementDoc> {
@@ -188,12 +132,12 @@ export class MovementsService {
         const currentAsset = await this.assetModel.findById(dto.assetId, null, { session });
         if (!currentAsset) throw new NotFoundException(`Asset ${dto.assetId} not found`);
         if (currentAsset.status !== AssetStatus.ISSUED) {
-          return this.replayOrThrow(dto.idempotencyKey, () =>
+          return replayOrThrow(this.movementModel, dto.idempotencyKey, () =>
             new ConflictException(`Asset ${dto.assetId} is not currently issued (status: ${currentAsset.status})`),
           );
         }
         if (currentAsset.currentHolderId !== dto.workerId) {
-          return this.replayOrThrow(dto.idempotencyKey, () =>
+          return replayOrThrow(this.movementModel, dto.idempotencyKey, () =>
             new ConflictException(
               `Asset ${dto.assetId} is currently held by ${currentAsset.currentHolderId}, not ${dto.workerId}`,
             ),
@@ -204,7 +148,7 @@ export class MovementsService {
           ? await this.movementModel.findById(currentAsset.currentMovementId, null, { session })
           : null;
         if (!openMovement) {
-          return this.replayOrThrow(dto.idempotencyKey, () => new ConflictException(`No open movement found for asset ${dto.assetId}`));
+          return replayOrThrow(this.movementModel, dto.idempotencyKey, () => new ConflictException(`No open movement found for asset ${dto.assetId}`));
         }
         if (occurredAt.getTime() < openMovement.occurredAt.getTime()) {
           throw new UnprocessableEntityException(
@@ -224,7 +168,8 @@ export class MovementsService {
           // fall back to replayOrThrow themselves), so a same-key winner would have already
           // been caught there. Retained for symmetry with executeIssue's CAS-miss branch and
           // as defense-in-depth if the guards above are ever reordered relative to this CAS.
-          return this.replayOrThrow(
+          return replayOrThrow(
+            this.movementModel,
             dto.idempotencyKey,
             () => new ConflictException(`Asset ${dto.assetId} changed concurrently; return not applied`),
           );
@@ -277,7 +222,7 @@ export class MovementsService {
     const { result } = await withIdempotency(this.movementModel, dto.idempotencyKey, () =>
       this.withRetries(() => this.executeCorrect(movementId, dto)),
     );
-    return this.toMovementResult(result);
+    return toMovementResult(result);
   }
 
   private async executeCorrect(movementId: string, dto: CorrectMovementDto): Promise<RawMovementDoc> {
@@ -310,7 +255,7 @@ export class MovementsService {
           // Either a genuinely different correction already claimed this movement, or this
           // is a double-click of the same submission racing itself — check before concluding
           // it's a real conflict, same reasoning as executeReturn's guard branches.
-          return this.replayOrThrow(dto.idempotencyKey, () => new ConflictException(`Movement ${movementId} has already been corrected`));
+          return replayOrThrow(this.movementModel, dto.idempotencyKey, () => new ConflictException(`Movement ${movementId} has already been corrected`));
         }
 
         const [correction] = await this.movementModel.create(

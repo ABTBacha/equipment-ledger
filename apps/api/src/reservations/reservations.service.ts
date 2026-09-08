@@ -6,7 +6,7 @@ import { Asset } from '../schemas/asset.schema';
 import { Reservation } from '../schemas/reservation.schema';
 import { AssetLock } from '../schemas/asset-lock.schema';
 import { intervalsOverlap } from '../domain/intervals';
-import { withIdempotency } from '../domain/idempotency';
+import { withIdempotency, replayOrThrow } from '../domain/idempotency';
 
 export interface ReservationResult {
   _id: string;
@@ -118,14 +118,10 @@ export class ReservationsService {
           // transaction's session: this transaction's snapshot may have been
           // established before the winner committed, so a session-scoped read here
           // could still see nothing even though the winner has already committed.
-          const existingReservation = await this.reservationModel
-            .findOne({ idempotencyKey: dto.idempotencyKey })
-            .lean();
-          if (existingReservation) {
-            return existingReservation as RawReservationDoc;
-          }
-          throw new ConflictException(
-            `Overlaps an existing reservation from ${conflicting.startAt.toISOString()} to ${conflicting.endAt.toISOString()}`,
+          return replayOrThrow<RawReservationDoc>(this.reservationModel, dto.idempotencyKey, () =>
+            new ConflictException(
+              `Overlaps an existing reservation from ${conflicting.startAt.toISOString()} to ${conflicting.endAt.toISOString()}`,
+            ),
           );
         }
 
