@@ -87,6 +87,16 @@ describe('Mongoose schemas', () => {
     ).rejects.toThrow(/duplicate key/);
   });
 
+  it('declares correctionOf/correctedBy as real ObjectId schema paths, not Mixed', () => {
+    // @nestjs/mongoose's DefinitionsFactory.isMongooseSchemaType() only recognizes
+    // mongoose.Schema.Types.ObjectId (aka SchemaTypes.ObjectId) — not mongoose.Types.ObjectId
+    // (the BSON value-construction class used for e.g. `new Types.ObjectId()`). Passing the
+    // latter as a @Prop's `type` used to fail that check silently, falling back to a Mixed
+    // path, which skips write-time casting and makes query-time casting/`populate()` unreliable.
+    expect(MovementSchema.path('correctionOf').instance).toBe('ObjectId');
+    expect(MovementSchema.path('correctedBy').instance).toBe('ObjectId');
+  });
+
   it('inserts a Reservation with default status ACTIVE', async () => {
     const reservation = await ReservationModel.create({
       assetId: 'HARN-014',

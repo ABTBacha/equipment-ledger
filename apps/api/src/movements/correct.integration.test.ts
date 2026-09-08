@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { getConnectionToken, getModelToken, MongooseModule } from '@nestjs/mongoose';
-import { Connection, Model, Types } from 'mongoose';
+import { Connection, Model } from 'mongoose';
 import { MovementsModule } from './movements.module';
 import { MovementsService } from './movements.service';
 import { Asset, AssetSchema } from '../schemas/asset.schema';
@@ -93,10 +93,12 @@ describe('MovementsService.correct', () => {
     const reloadedOriginal = await movementModel.findById(original._id).lean();
     expect(String(reloadedOriginal?.correctedBy)).toBe(String(winner._id));
 
-    // NOTE: `correctionOf` is stored as a real ObjectId, but the schema's `@Prop` for it
-    // resolves to Mixed (a pre-existing quirk unrelated to this task), so Mongoose does not
-    // auto-cast a plain hex string in a query filter the way it does for `_id`. Cast explicitly.
-    const correctionCount = await movementModel.countDocuments({ correctionOf: new Types.ObjectId(original._id) });
+    // `correctionOf` is declared with `type: SchemaTypes.ObjectId` in movement.schema.ts (not
+    // `Types.ObjectId`, the BSON value-construction class, which @nestjs/mongoose's
+    // DefinitionsFactory.isMongooseSchemaType() fails to recognize and silently falls back to a
+    // Mixed path for) — so Mongoose properly casts this plain hex-string filter value to an
+    // ObjectId for the query, the same as it does for `_id`.
+    const correctionCount = await movementModel.countDocuments({ correctionOf: original._id });
     expect(correctionCount).toBe(1);
   });
 
@@ -111,7 +113,7 @@ describe('MovementsService.correct', () => {
 
     expect(String(a._id)).toBe(String(b._id));
 
-    const correctionCount = await movementModel.countDocuments({ correctionOf: new Types.ObjectId(original._id) });
+    const correctionCount = await movementModel.countDocuments({ correctionOf: original._id });
     expect(correctionCount).toBe(1);
 
     const reloadedOriginal = await movementModel.findById(original._id).lean();

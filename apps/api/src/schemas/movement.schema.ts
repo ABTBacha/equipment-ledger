@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { SchemaTypes, Types } from 'mongoose';
 import { MovementType } from '@equipment-ledger/shared';
 
 @Schema({ collection: 'movements' })
@@ -24,10 +24,10 @@ export class Movement {
   @Prop({ type: String, required: true, unique: true })
   idempotencyKey!: string;
 
-  @Prop({ type: Types.ObjectId, ref: Movement.name, default: null })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Movement.name, default: null })
   correctionOf!: Types.ObjectId | null;
 
-  @Prop({ type: Types.ObjectId, ref: Movement.name, default: null })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Movement.name, default: null })
   correctedBy!: Types.ObjectId | null;
 
   @Prop({ type: String, default: null })
