@@ -3,7 +3,6 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { Worker, WorkerSchema } from '../schemas/worker.schema';
 import { Reservation, ReservationSchema } from '../schemas/reservation.schema';
 import { AssetsModule } from '../assets/assets.module';
-import { MovementsModule } from '../movements/movements.module';
 import { WorkersService } from './workers.service';
 import { WorkersController } from './workers.controller';
 
@@ -14,7 +13,6 @@ import { WorkersController } from './workers.controller';
       { name: Reservation.name, schema: ReservationSchema },
     ]),
     AssetsModule,
-    MovementsModule,
   ],
   providers: [WorkersService],
   controllers: [WorkersController],

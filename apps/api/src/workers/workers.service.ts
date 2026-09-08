@@ -4,7 +4,6 @@ import { Model } from 'mongoose';
 import { Worker } from '../schemas/worker.schema';
 import { Reservation } from '../schemas/reservation.schema';
 import { AssetsService, AssetSummary } from '../assets/assets.service';
-import { MovementsService } from '../movements/movements.service';
 import { ReservationResult, RawReservationDoc, toReservationResult } from '../reservations/reservation-result';
 
 export interface WorkerSummary {
@@ -21,7 +20,6 @@ export class WorkersService {
     @InjectModel(Worker.name) private readonly workerModel: Model<Worker>,
     @InjectModel(Reservation.name) private readonly reservationModel: Model<Reservation>,
     private readonly assetsService: AssetsService,
-    private readonly movementsService: MovementsService,
   ) {}
 
   async findAll(): Promise<Worker[]> {

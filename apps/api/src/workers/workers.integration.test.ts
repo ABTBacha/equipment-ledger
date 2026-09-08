@@ -4,6 +4,7 @@ import { Connection, Model } from 'mongoose';
 import { WorkersModule } from './workers.module';
 import { WorkersService } from './workers.service';
 import { MovementsModule } from '../movements/movements.module';
+import { MovementsService } from '../movements/movements.service';
 import { Asset, AssetSchema } from '../schemas/asset.schema';
 import { Worker, WorkerSchema } from '../schemas/worker.schema';
 import { Movement, MovementSchema } from '../schemas/movement.schema';
@@ -11,6 +12,7 @@ import { Reservation, ReservationSchema } from '../schemas/reservation.schema';
 
 describe('WorkersService', () => {
   let service: WorkersService;
+  let movementsService: MovementsService;
   let connection: Connection;
   let assetModel: Model<Asset>;
   let workerModel: Model<Worker>;
@@ -31,6 +33,7 @@ describe('WorkersService', () => {
     }).compile();
 
     service = moduleRef.get(WorkersService);
+    movementsService = moduleRef.get(MovementsService);
     connection = moduleRef.get(getConnectionToken());
     assetModel = moduleRef.get(getModelToken(Asset.name));
     workerModel = moduleRef.get(getModelToken(Worker.name));
@@ -43,7 +46,7 @@ describe('WorkersService', () => {
   it('findOne reports the assets a worker currently holds', async () => {
     await workerModel.create({ _id: 'worker-2', name: 'Ben Cole', certifications: [{ code: 'GAS-DETECT', expiresAt: new Date('2020-01-01') }] });
     await assetModel.create({ _id: 'DRILL-003', kind: 'drill', requiresCertification: null });
-    await service['movementsService'].issue({ assetId: 'DRILL-003', workerId: 'worker-2', idempotencyKey: 'wk-issue-1' });
+    await movementsService.issue({ assetId: 'DRILL-003', workerId: 'worker-2', idempotencyKey: 'wk-issue-1' });
 
     const worker = await service.findOne('worker-2');
     expect(worker.currentlyHolding).toHaveLength(1);
