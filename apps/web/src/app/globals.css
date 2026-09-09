@@ -1,3 +1,63 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --bg-base: #0f1214;
+  --bg-surface: #171b1e;
+  --bg-raised: #1f2427;
+  --border: #2b3236;
+  --text-primary: #e4e7e9;
+  --text-muted: #8a9296;
+  --accent-green: #4f9e6b;
+  --accent-amber: #e0a030;
+  --accent-red: #d65c4f;
+  --accent-blue: #5b8fbf;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body {
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+}
+
+body {
+  font-family: var(--font-plex-sans), 'IBM Plex Sans', system-ui, sans-serif;
+}
+
+.font-mono {
+  font-family: var(--font-plex-mono), 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+.animate-skeleton {
+  animation: skeleton-pulse 1.6s ease-in-out infinite;
+}

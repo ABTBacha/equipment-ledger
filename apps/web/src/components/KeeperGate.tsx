@@ -31,21 +31,23 @@ export function KeeperGate({ children }: { children: React.ReactNode }) {
 
   if (!keeper) {
     return (
-      <div className="p-8 max-w-md mx-auto">
-        <h1 className="text-xl font-semibold mb-4">Who&apos;s on the hatch?</h1>
-        <ul className="space-y-2">
-          {KEEPERS.map((name) => (
-            <li key={name}>
-              <button
-                type="button"
-                className="w-full text-left px-4 py-2 border rounded hover:bg-gray-50"
-                onClick={() => selectKeeper(name)}
-              >
-                {name}
-              </button>
-            </li>
-          ))}
-        </ul>
+      <div className="min-h-screen bg-base text-primary flex items-center justify-center">
+        <div className="p-8 max-w-md w-full mx-auto">
+          <h1 className="text-xl font-semibold mb-4">Who&apos;s on the hatch?</h1>
+          <ul className="space-y-2">
+            {KEEPERS.map((name) => (
+              <li key={name}>
+                <button
+                  type="button"
+                  className="w-full text-left px-4 py-2 border border-hairline bg-surface hover:bg-raised text-primary"
+                  onClick={() => selectKeeper(name)}
+                >
+                  {name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       </div>
     );
   }
