@@ -21,26 +21,43 @@ export function HistoryClient() {
   const [asOfInput, setAsOfInput] = useState('');
   const [snapshot, setSnapshot] = useState<AssetSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch<AssetSummary[]>('/assets').then(setAssetMeta);
+    apiFetch<AssetSummary[]>('/assets')
+      .then(setAssetMeta)
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : 'Something went wrong');
+        setLoading(false);
+      });
   }, []);
 
   const loadAsOf = async (meta: AssetSummary[], asOfIso?: string) => {
     setLoading(true);
-    const query = asOfIso ? `?asOf=${encodeURIComponent(asOfIso)}` : '';
-    const response = await apiFetch<StoreResponse>(`/store${query}`);
-    setSnapshot(
-      meta.map((m) => {
-        const state = response.assets[m._id];
-        return {
-          ...m,
-          status: state?.status ?? 'IN_STORE',
-          currentHolderId: state?.holderId ?? null,
-        };
-      }),
-    );
-    setLoading(false);
+    try {
+      const query = asOfIso ? `?asOf=${encodeURIComponent(asOfIso)}` : '';
+      const response = await apiFetch<StoreResponse>(`/store${query}`);
+      setSnapshot(
+        meta.map((m) => {
+          const state = response.assets[m._id];
+          return {
+            ...m,
+            status: state?.status ?? 'IN_STORE',
+            currentHolderId: state?.holderId ?? null,
+            // Historical reconstruction only covers status/holder (from /store?asOf=).
+            // upcomingReservation and lastActivityAt are always the CURRENT values on the
+            // /assets response, so they must never be shown on a past "as of" snapshot.
+            upcomingReservation: null,
+            lastActivityAt: null,
+          };
+        }),
+      );
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -94,6 +111,7 @@ export function HistoryClient() {
           Now
         </button>
       </div>
+      {error && <div className="text-sm text-accent-red mb-3">{error}</div>}
       <DataTable columns={columns} rows={snapshot} rowKey={(a) => a._id} loading={loading && snapshot.length === 0} />
     </main>
   );
