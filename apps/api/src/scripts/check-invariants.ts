@@ -112,6 +112,21 @@ export async function checkInvariants(uri: string): Promise<InvariantViolation[]
       }
     }
 
+    // Reverse direction: a movement with correctedBy set must be checked too, even if
+    // nothing's correctionOf pointed at it from the forward pass above (e.g. a stale or
+    // wrong forward pointer, or a corrupted/nonexistent correctedBy target).
+    for (const m of movementDocs) {
+      if (m.correctedBy) {
+        const key = String(m.correctedBy);
+        const correction = movementById.get(key);
+        if (!correction) {
+          violations.push({ rule: 'correction-integrity', detail: `Movement ${m._id} has correctedBy pointing at nonexistent movement ${key}` });
+        } else if (String(correction.correctionOf) !== String(m._id)) {
+          violations.push({ rule: 'correction-integrity', detail: `Movement ${m._id} has correctedBy=${key}, but that movement's correctionOf does not point back to ${m._id}` });
+        }
+      }
+    }
+
     return violations;
   } finally {
     await conn.close();

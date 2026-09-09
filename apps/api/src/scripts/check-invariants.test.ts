@@ -99,4 +99,56 @@ describe('checkInvariants', () => {
     const violations = await checkInvariants(process.env.MONGO_URI!);
     expect(violations.some((v) => v.rule === 'no-double-open-movement')).toBe(true);
   });
+
+  it('reports a violation when correctedBy points at a movement whose correctionOf does not point back', async () => {
+    await AssetModel.deleteMany({});
+    await MovementModel.deleteMany({});
+    await ReservationModel.deleteMany({});
+    await AssetModel.create({ _id: 'BADCORRECTION-1', kind: 'drill', requiresCertification: null, status: 'ISSUED', currentHolderId: 'worker-1' });
+
+    const original = await MovementModel.create({
+      assetId: 'BADCORRECTION-1',
+      workerId: 'worker-1',
+      type: 'ISSUE',
+      occurredAt: new Date('2026-08-01T09:00:00Z'),
+      recordedAt: new Date('2026-08-01T09:00:00Z'),
+      idempotencyKey: 'inv-badcorr-original',
+    });
+    // An unrelated movement that does NOT reference `original` via correctionOf.
+    const unrelated = await MovementModel.create({
+      assetId: 'BADCORRECTION-1',
+      workerId: 'worker-1',
+      type: 'ISSUE',
+      occurredAt: new Date('2026-08-02T09:00:00Z'),
+      recordedAt: new Date('2026-08-02T09:00:00Z'),
+      idempotencyKey: 'inv-badcorr-unrelated',
+    });
+    // Corrupt: original.correctedBy points at `unrelated`, but unrelated.correctionOf is
+    // still null (it never actually references `original` back) -- a stale/wrong forward pointer.
+    await MovementModel.updateOne({ _id: original._id }, { $set: { correctedBy: unrelated._id } });
+
+    const violations = await checkInvariants(process.env.MONGO_URI!);
+    expect(violations.some((v) => v.rule === 'correction-integrity')).toBe(true);
+  });
+
+  it('reports a violation when correctedBy points at a nonexistent movement', async () => {
+    await AssetModel.deleteMany({});
+    await MovementModel.deleteMany({});
+    await ReservationModel.deleteMany({});
+    await AssetModel.create({ _id: 'DANGLINGCORRECTION-1', kind: 'drill', requiresCertification: null, status: 'ISSUED', currentHolderId: 'worker-1' });
+
+    const original = await MovementModel.create({
+      assetId: 'DANGLINGCORRECTION-1',
+      workerId: 'worker-1',
+      type: 'ISSUE',
+      occurredAt: new Date('2026-08-01T09:00:00Z'),
+      recordedAt: new Date('2026-08-01T09:00:00Z'),
+      idempotencyKey: 'inv-dangling-original',
+    });
+    // Corrupt: correctedBy points at an id that does not correspond to any movement.
+    await MovementModel.updateOne({ _id: original._id }, { $set: { correctedBy: new mongoose.Types.ObjectId() } });
+
+    const violations = await checkInvariants(process.env.MONGO_URI!);
+    expect(violations.some((v) => v.rule === 'correction-integrity')).toBe(true);
+  });
 });
