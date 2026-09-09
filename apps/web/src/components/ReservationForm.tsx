@@ -89,7 +89,7 @@ export function ReservationForm({ onCreated }: { onCreated: () => void }) {
         type="button"
         onClick={submit}
         disabled={submitting}
-        className="px-3 py-1 border border-hairline bg-accent-blue text-primary disabled:opacity-50"
+        className="px-3 py-1 border border-hairline bg-accent-blue text-base disabled:opacity-50"
       >
         Reserve
       </button>

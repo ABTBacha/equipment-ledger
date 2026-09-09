@@ -80,7 +80,7 @@ export function IssueReturnModal({
             type="button"
             onClick={submit}
             disabled={submitting || !workerId}
-            className="px-3 py-1 border border-hairline bg-accent-blue text-primary disabled:opacity-50"
+            className="px-3 py-1 border border-hairline bg-accent-blue text-base disabled:opacity-50"
           >
             Confirm
           </button>

@@ -122,7 +122,7 @@ export function OutOfServiceControl({
           type="button"
           onClick={submit}
           disabled={submitting}
-          className="px-3 py-1 border border-hairline bg-accent-red text-primary disabled:opacity-50"
+          className="px-3 py-1 border border-hairline bg-accent-red text-base disabled:opacity-50"
         >
           Confirm take out of service
         </button>

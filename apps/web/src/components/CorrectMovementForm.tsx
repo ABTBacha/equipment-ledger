@@ -56,7 +56,7 @@ export function CorrectMovementForm({ movementId, onDone }: { movementId: string
         type="button"
         onClick={submit}
         disabled={submitting || !occurredAt}
-        className="text-sm px-3 py-1 border border-hairline bg-accent-blue text-primary disabled:opacity-50"
+        className="text-sm px-3 py-1 border border-hairline bg-accent-blue text-base disabled:opacity-50"
       >
         Save correction
       </button>
