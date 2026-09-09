@@ -20,54 +20,90 @@ const asset = {
   lastActivityAt: null,
 };
 
-describe('IssueReturnModal idempotency key', () => {
-  beforeEach(() => {
-    (apiFetch as jest.Mock).mockReset();
-  });
+const WORKERS = [
+  { _id: 'worker-1', name: 'Worker One', certifications: [], currentlyHolding: [] },
+  { _id: 'worker-2', name: 'Worker Two', certifications: [], currentlyHolding: [] },
+  { _id: 'worker-9', name: 'Worker Nine', certifications: [], currentlyHolding: [] },
+];
 
+/**
+ * The mocked apiFetch serves the `GET /workers` call the modal makes on mount from a fixed
+ * worker list, and queues separate resolutions/rejections (in order) for every other call
+ * (the movement submit), independent of when the workers fetch happens to land.
+ */
+function mockApiFetch() {
+  const submitQueue: Array<() => Promise<unknown>> = [];
+  (apiFetch as jest.Mock).mockReset();
+  (apiFetch as jest.Mock).mockImplementation((path: string) => {
+    if (path === '/workers') return Promise.resolve(WORKERS);
+    const next = submitQueue.shift();
+    return next ? next() : Promise.resolve({});
+  });
+  return {
+    queueSubmitReject: (err: Error) => submitQueue.push(() => Promise.reject(err)),
+    queueSubmitResolve: (value: unknown = {}) => submitQueue.push(() => Promise.resolve(value)),
+  };
+}
+
+async function selectWorker(label: string) {
+  const input = await screen.findByPlaceholderText('Select worker');
+  fireEvent.focus(input);
+  fireEvent.click(await screen.findByText(label));
+}
+
+describe('IssueReturnModal idempotency key', () => {
   it('reuses the same idempotency key across a retry after a failed submit', async () => {
-    (apiFetch as jest.Mock).mockRejectedValueOnce(new Error('network blip')).mockResolvedValueOnce({});
+    const { queueSubmitReject, queueSubmitResolve } = mockApiFetch();
+    queueSubmitReject(new Error('network blip'));
+    queueSubmitResolve();
 
     render(<IssueReturnModal asset={asset} action="issue" onClose={jest.fn()} />);
-    fireEvent.change(screen.getByPlaceholderText('Worker ID'), { target: { value: 'worker-1' } });
+    await selectWorker('Worker One (worker-1)');
     fireEvent.click(screen.getByText('Confirm'));
-    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/movements/issue', expect.anything()));
 
     fireEvent.click(screen.getByText('Confirm'));
-    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      const calls = (apiFetch as jest.Mock).mock.calls.filter((c) => c[0] === '/movements/issue');
+      expect(calls).toHaveLength(2);
+    });
 
-    const firstKey = JSON.parse((apiFetch as jest.Mock).mock.calls[0][1].body).idempotencyKey;
-    const secondKey = JSON.parse((apiFetch as jest.Mock).mock.calls[1][1].body).idempotencyKey;
+    const movementCalls = (apiFetch as jest.Mock).mock.calls.filter((c) => c[0] === '/movements/issue');
+    const firstKey = JSON.parse(movementCalls[0][1].body).idempotencyKey;
+    const secondKey = JSON.parse(movementCalls[1][1].body).idempotencyKey;
     expect(firstKey).toBe(secondKey);
   });
 
   it('generates a new idempotency key for a new modal instance', async () => {
-    (apiFetch as jest.Mock).mockResolvedValue({});
+    const { queueSubmitResolve } = mockApiFetch();
+    queueSubmitResolve();
+    queueSubmitResolve();
 
     const { unmount } = render(<IssueReturnModal asset={asset} action="issue" onClose={jest.fn()} />);
-    fireEvent.change(screen.getByPlaceholderText('Worker ID'), { target: { value: 'worker-1' } });
+    await selectWorker('Worker One (worker-1)');
     fireEvent.click(screen.getByText('Confirm'));
-    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1));
-    const firstKey = JSON.parse((apiFetch as jest.Mock).mock.calls[0][1].body).idempotencyKey;
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/movements/issue', expect.anything()));
     unmount();
 
     render(<IssueReturnModal asset={asset} action="issue" onClose={jest.fn()} />);
-    fireEvent.change(screen.getByPlaceholderText('Worker ID'), { target: { value: 'worker-2' } });
+    await selectWorker('Worker Two (worker-2)');
     fireEvent.click(screen.getByText('Confirm'));
-    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(2));
-    const secondKey = JSON.parse((apiFetch as jest.Mock).mock.calls[1][1].body).idempotencyKey;
+    await waitFor(() => {
+      const calls = (apiFetch as jest.Mock).mock.calls.filter((c) => c[0] === '/movements/issue');
+      expect(calls).toHaveLength(2);
+    });
 
+    const movementCalls = (apiFetch as jest.Mock).mock.calls.filter((c) => c[0] === '/movements/issue');
+    const firstKey = JSON.parse(movementCalls[0][1].body).idempotencyKey;
+    const secondKey = JSON.parse(movementCalls[1][1].body).idempotencyKey;
     expect(secondKey).not.toBe(firstKey);
   });
 });
 
 describe('IssueReturnModal toast on success', () => {
-  beforeEach(() => {
-    (apiFetch as jest.Mock).mockReset();
-  });
-
   it('shows a toast with the expected message after a successful issue, when wrapped in a real ToastProvider', async () => {
-    (apiFetch as jest.Mock).mockResolvedValue({});
+    const { queueSubmitResolve } = mockApiFetch();
+    queueSubmitResolve();
 
     render(
       <ToastProvider>
@@ -75,10 +111,10 @@ describe('IssueReturnModal toast on success', () => {
       </ToastProvider>,
     );
 
-    fireEvent.change(screen.getByPlaceholderText('Worker ID'), { target: { value: 'worker-9' } });
+    await selectWorker('Worker Nine (worker-9)');
     fireEvent.click(screen.getByText('Confirm'));
 
-    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/movements/issue', expect.anything()));
     expect(await screen.findByText('Issued to worker-9')).toBeInTheDocument();
   });
 });

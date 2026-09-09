@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { apiFetch, getCurrentKeeper, newIdempotencyKey } from '../lib/api';
 import { AssetSummary } from './StoreGrid';
+import { SearchableSelect, SearchableSelectOption } from './SearchableSelect';
+import { WorkerSummaryView } from '../lib/types';
 import { useToast } from './ToastProvider';
 
 export function IssueReturnModal({
@@ -17,9 +19,25 @@ export function IssueReturnModal({
   const { showToast } = useToast();
   const [idempotencyKey] = useState(() => newIdempotencyKey());
   const [workerId, setWorkerId] = useState('');
+  const [workerOptions, setWorkerOptions] = useState<SearchableSelectOption[]>([]);
   const [occurredAt, setOccurredAt] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<WorkerSummaryView[]>('/workers')
+      .then((workers) => {
+        if (cancelled) return;
+        setWorkerOptions(workers.map((w) => ({ value: w._id, label: `${w.name} (${w._id})` })));
+      })
+      .catch(() => {
+        // Non-fatal: the dropdown just stays empty if the worker list fails to load.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const submit = async () => {
     setSubmitting(true);
@@ -50,14 +68,16 @@ export function IssueReturnModal({
         <h2 className="text-lg font-semibold mb-4 text-primary">
           {action === 'issue' ? 'Issue' : 'Return'} {asset._id}
         </h2>
-        <input
-          type="text"
-          placeholder="Worker ID"
-          value={workerId}
-          onChange={(e) => setWorkerId(e.target.value)}
-          className="border border-hairline bg-surface px-3 py-2 w-full mb-3 text-primary placeholder:text-muted"
-          disabled={submitting}
-        />
+        <div className="mb-3">
+          <SearchableSelect
+            options={workerOptions}
+            value={workerId}
+            onChange={setWorkerId}
+            placeholder="Select worker"
+            disabled={submitting}
+            aria-label="Worker"
+          />
+        </div>
         <label className="block text-sm mb-1 text-muted">Occurred at (leave blank for now)</label>
         <input
           type="datetime-local"
