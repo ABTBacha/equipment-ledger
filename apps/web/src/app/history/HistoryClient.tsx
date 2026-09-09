@@ -2,44 +2,45 @@
 
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/api';
-import { AssetSummary, StoreGrid } from '../../components/StoreGrid';
-
-interface AssetMeta {
-  _id: string;
-  kind: string;
-  requiresCertification: string | null;
-}
+import { AssetSummary } from '../../components/StoreGrid';
+import { DataTable, DataTableColumn } from '../../components/DataTable';
+import { StatusIndicator } from '../../components/StatusIndicator';
 
 interface StoreResponse {
   asOf: string;
   assets: Record<string, { status: 'IN_STORE' | 'ISSUED' | 'OUT_OF_SERVICE'; holderId: string | null }>;
 }
 
+function formatDateTime(iso: string | null): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString();
+}
+
 export function HistoryClient() {
-  const [assetMeta, setAssetMeta] = useState<AssetMeta[]>([]);
+  const [assetMeta, setAssetMeta] = useState<AssetSummary[]>([]);
   const [asOfInput, setAsOfInput] = useState('');
   const [snapshot, setSnapshot] = useState<AssetSummary[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiFetch<AssetMeta[]>('/assets').then(setAssetMeta);
+    apiFetch<AssetSummary[]>('/assets').then(setAssetMeta);
   }, []);
 
-  const loadAsOf = async (meta: AssetMeta[], asOfIso?: string) => {
+  const loadAsOf = async (meta: AssetSummary[], asOfIso?: string) => {
+    setLoading(true);
     const query = asOfIso ? `?asOf=${encodeURIComponent(asOfIso)}` : '';
     const response = await apiFetch<StoreResponse>(`/store${query}`);
     setSnapshot(
       meta.map((m) => {
         const state = response.assets[m._id];
         return {
-          _id: m._id,
-          kind: m.kind,
-          requiresCertification: m.requiresCertification,
+          ...m,
           status: state?.status ?? 'IN_STORE',
           currentHolderId: state?.holderId ?? null,
-          upcomingReservation: null,
         };
       }),
     );
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -57,6 +58,27 @@ export function HistoryClient() {
     loadAsOf(assetMeta);
   };
 
+  const columns: DataTableColumn<AssetSummary>[] = [
+    { key: 'code', header: 'Code', render: (a) => <span className="font-mono text-primary">{a._id}</span> },
+    { key: 'kind', header: 'Kind', render: (a) => a.kind },
+    { key: 'status', header: 'Status', render: (a) => <StatusIndicator status={a.status} /> },
+    { key: 'holder', header: 'Holder', render: (a) => a.currentHolderId ?? '—' },
+    { key: 'cert', header: 'Cert required', render: (a) => a.requiresCertification ?? '—' },
+    {
+      key: 'reservation',
+      header: 'Upcoming reservation',
+      render: (a) =>
+        a.upcomingReservation
+          ? `${a.upcomingReservation.workerId}, ${formatDateTime(a.upcomingReservation.startAt)}`
+          : '—',
+    },
+    {
+      key: 'activity',
+      header: 'Last activity',
+      render: (a) => <span className="font-mono text-muted">{formatDateTime(a.lastActivityAt)}</span>,
+    },
+  ];
+
   return (
     <main className="p-8 max-w-6xl mx-auto">
       <h1 className="text-2xl font-semibold mb-6">Store history</h1>
@@ -66,13 +88,13 @@ export function HistoryClient() {
           aria-label="As of"
           value={asOfInput}
           onChange={(e) => handleTimestampChange(e.target.value)}
-          className="border rounded px-3 py-2"
+          className="border border-hairline bg-surface px-3 py-2 text-primary"
         />
-        <button type="button" onClick={handleNow} className="px-3 py-1 border rounded">
+        <button type="button" onClick={handleNow} className="px-3 py-1 border border-hairline text-primary hover:bg-raised">
           Now
         </button>
       </div>
-      <StoreGrid assets={snapshot} />
+      <DataTable columns={columns} rows={snapshot} rowKey={(a) => a._id} loading={loading && snapshot.length === 0} />
     </main>
   );
 }

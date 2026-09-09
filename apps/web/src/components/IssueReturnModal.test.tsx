@@ -16,6 +16,7 @@ const asset = {
   status: 'IN_STORE' as const,
   currentHolderId: null,
   upcomingReservation: null,
+  lastActivityAt: null,
 };
 
 describe('IssueReturnModal idempotency key', () => {
