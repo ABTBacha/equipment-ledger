@@ -43,6 +43,7 @@ export interface ReservationView {
   startAt: string;
   endAt: string;
   status: ReservationStatus;
+  cancelReason: string | null;
 }
 
 export const RESERVATION_STATUS_LABEL: Record<ReservationStatus, string> = {

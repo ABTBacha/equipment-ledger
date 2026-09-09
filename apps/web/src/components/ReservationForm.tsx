@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { apiFetch, newIdempotencyKey } from '../lib/api';
+import { ApiError, apiFetch, newIdempotencyKey } from '../lib/api';
+import { formatOverlapMessage } from '../lib/format';
 import { AssetSummary } from './StoreGrid';
 import { WorkerSummaryView } from '../lib/types';
 import { SearchableSelect, SearchableSelectOption } from './SearchableSelect';
@@ -80,7 +81,10 @@ export function ReservationForm({ onCreated }: { onCreated: () => void }) {
       setIdempotencyKey(newIdempotencyKey());
       onCreated();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
+      // An overlap conflict names the clashing window; the server can only express it in UTC,
+      // so re-render it here in the keeper's own timezone.
+      const localised = err instanceof ApiError ? formatOverlapMessage(err.body) : null;
+      setError(localised ?? (err instanceof Error ? err.message : 'Something went wrong'));
     } finally {
       setSubmitting(false);
     }

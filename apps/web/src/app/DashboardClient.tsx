@@ -1,16 +1,14 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AssetSummary } from '../components/StoreGrid';
 import { IssueReturnModal } from '../components/IssueReturnModal';
+import { OutOfServiceControl } from '../components/OutOfServiceControl';
 import { DataTable, DataTableColumn } from '../components/DataTable';
 import { StatusIndicator } from '../components/StatusIndicator';
-
-function formatDateTime(iso: string | null): string {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString();
-}
+import { formatDateTime } from '../lib/format';
 
 export function DashboardClient({ assets }: { assets: AssetSummary[] }) {
   const router = useRouter();
@@ -38,7 +36,15 @@ export function DashboardClient({ assets }: { assets: AssetSummary[] }) {
   };
 
   const columns: DataTableColumn<AssetSummary>[] = [
-    { key: 'code', header: 'Code', render: (a) => <span className="font-mono text-primary">{a._id}</span> },
+    {
+      key: 'code',
+      header: 'Code',
+      render: (a) => (
+        <Link href={`/assets/${a._id}`} className="font-mono text-primary hover:underline">
+          {a._id}
+        </Link>
+      ),
+    },
     { key: 'kind', header: 'Kind', render: (a) => a.kind },
     { key: 'status', header: 'Status', render: (a) => <StatusIndicator status={a.status} /> },
     { key: 'holder', header: 'Holder', render: (a) => a.currentHolderId ?? '—' },
@@ -84,6 +90,7 @@ export function DashboardClient({ assets }: { assets: AssetSummary[] }) {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
+          aria-label="Status filter"
           className="border border-hairline bg-surface px-3 py-2 text-primary"
         >
           <option value="">All statuses</option>
@@ -116,6 +123,7 @@ export function DashboardClient({ assets }: { assets: AssetSummary[] }) {
                 Return
               </button>
             )}
+            <OutOfServiceControl assetId={asset._id} status={asset.status} onDone={() => router.refresh()} />
           </div>
         )}
       />

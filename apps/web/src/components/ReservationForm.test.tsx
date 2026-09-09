@@ -1,11 +1,13 @@
 import '@testing-library/jest-dom';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ReservationForm } from './ReservationForm';
-import { apiFetch } from '../lib/api';
+import { ApiError, apiFetch } from '../lib/api';
 
 jest.mock('../lib/api', () => ({
   apiFetch: jest.fn(),
   newIdempotencyKey: jest.requireActual('../lib/api').newIdempotencyKey,
+  // The real class, so `instanceof ApiError` inside the component matches what the test throws.
+  ApiError: jest.requireActual('../lib/api').ApiError,
 }));
 
 const ASSETS = [
@@ -97,6 +99,33 @@ describe('ReservationForm', () => {
     fireEvent.click(screen.getByText('Reserve'));
 
     await waitFor(() => expect(screen.getByText(/Overlaps an existing reservation/)).toBeInTheDocument());
+  });
+
+  it('renders the conflicting window in local time, not as a UTC ISO string', async () => {
+    const { queueSubmitReject } = mockApiFetch();
+    queueSubmitReject(
+      new ApiError(
+        'Overlaps an existing reservation from 2027-01-10T09:00:00.000Z to 2027-01-10T17:00:00.000Z',
+        409,
+        {
+          code: 'RESERVATION_OVERLAP',
+          conflict: { startAt: '2027-01-10T09:00:00.000Z', endAt: '2027-01-10T17:00:00.000Z' },
+        },
+      ),
+    );
+
+    render(<ReservationForm onCreated={jest.fn()} />);
+    await selectAsset('DRILL-001 — drill (in store)');
+    await selectWorker('Worker One (worker-1)');
+    fireEvent.change(screen.getByLabelText('Start'), { target: { value: '2027-01-10T12:00' } });
+    fireEvent.change(screen.getByLabelText('End'), { target: { value: '2027-01-10T20:00' } });
+    fireEvent.click(screen.getByText('Reserve'));
+
+    const expected = `Overlaps an existing reservation from ${new Date(
+      '2027-01-10T09:00:00.000Z',
+    ).toLocaleString()} to ${new Date('2027-01-10T17:00:00.000Z').toLocaleString()}`;
+    await waitFor(() => expect(screen.getByText(expected)).toBeInTheDocument());
+    expect(screen.queryByText(/2027-01-10T09:00:00\.000Z/)).not.toBeInTheDocument();
   });
 
   it('generates a new idempotency key (and clears fields) after a successful submission, ready for a new entry', async () => {
