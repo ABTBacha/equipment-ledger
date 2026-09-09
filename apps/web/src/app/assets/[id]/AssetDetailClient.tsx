@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { AssetSummary } from '../../../components/StoreGrid';
 import { HistoryTimeline } from '../../../components/HistoryTimeline';
 import { IssueReturnModal } from '../../../components/IssueReturnModal';
+import { OutOfServiceControl } from '../../../components/OutOfServiceControl';
 import { HistoryEntryView } from '../../../lib/types';
 
 export function AssetDetailClient({ asset, history }: { asset: AssetSummary; history: HistoryEntryView[] }) {
@@ -30,6 +31,7 @@ export function AssetDetailClient({ asset, history }: { asset: AssetSummary; his
             Return
           </button>
         )}
+        <OutOfServiceControl assetId={asset._id} status={asset.status} onDone={refresh} />
       </div>
       <h2 className="text-lg font-semibold mb-3">History</h2>
       <HistoryTimeline entries={history} onCorrected={refresh} />

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { apiFetch, newIdempotencyKey } from '../lib/api';
+import { apiFetch, getCurrentKeeper, newIdempotencyKey } from '../lib/api';
 import { AssetSummary } from './StoreGrid';
 
 export function IssueReturnModal({
@@ -15,6 +15,7 @@ export function IssueReturnModal({
 }) {
   const [idempotencyKey] = useState(() => newIdempotencyKey());
   const [workerId, setWorkerId] = useState('');
+  const [occurredAt, setOccurredAt] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,7 +26,13 @@ export function IssueReturnModal({
       const path = action === 'issue' ? '/movements/issue' : '/movements/return';
       await apiFetch(path, {
         method: 'POST',
-        body: JSON.stringify({ assetId: asset._id, workerId, idempotencyKey }),
+        body: JSON.stringify({
+          assetId: asset._id,
+          workerId,
+          idempotencyKey,
+          occurredAt: occurredAt ? new Date(occurredAt).toISOString() : undefined,
+          loggedBy: getCurrentKeeper() ?? undefined,
+        }),
       });
       onClose();
     } catch (err) {
@@ -45,6 +52,14 @@ export function IssueReturnModal({
           placeholder="Worker ID"
           value={workerId}
           onChange={(e) => setWorkerId(e.target.value)}
+          className="border rounded px-3 py-2 w-full mb-3"
+          disabled={submitting}
+        />
+        <label className="block text-sm mb-1">Occurred at (leave blank for now)</label>
+        <input
+          type="datetime-local"
+          value={occurredAt}
+          onChange={(e) => setOccurredAt(e.target.value)}
           className="border rounded px-3 py-2 w-full mb-3"
           disabled={submitting}
         />

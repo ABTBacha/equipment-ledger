@@ -16,3 +16,14 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 export function newIdempotencyKey(): string {
   return crypto.randomUUID();
 }
+
+const KEEPER_STORAGE_KEY = 'equipment-ledger:keeper';
+
+/** Reads the keeper name KeeperGate persisted at login. Cosmetic attribution only — not access control. */
+export function getCurrentKeeper(): string | null {
+  try {
+    return window.localStorage.getItem(KEEPER_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}

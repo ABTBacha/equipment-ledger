@@ -6,6 +6,7 @@ import { apiFetch } from '../lib/api';
 jest.mock('../lib/api', () => ({
   apiFetch: jest.fn(),
   newIdempotencyKey: jest.requireActual('../lib/api').newIdempotencyKey,
+  getCurrentKeeper: jest.fn(() => null),
 }));
 
 const asset = {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { apiFetch, newIdempotencyKey } from '../lib/api';
+import { apiFetch, getCurrentKeeper, newIdempotencyKey } from '../lib/api';
 
 export function CorrectMovementForm({ movementId, onDone }: { movementId: string; onDone: () => void }) {
   const [idempotencyKey] = useState(() => newIdempotencyKey());
@@ -20,6 +20,7 @@ export function CorrectMovementForm({ movementId, onDone }: { movementId: string
           occurredAt: occurredAt ? new Date(occurredAt).toISOString() : undefined,
           reason: reason || undefined,
           idempotencyKey,
+          loggedBy: getCurrentKeeper() ?? undefined,
         }),
       });
       onDone();

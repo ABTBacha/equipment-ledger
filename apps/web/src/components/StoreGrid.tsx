@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 export interface AssetSummary {
   _id: string;
   kind: string;
@@ -27,10 +29,10 @@ export function StoreGrid({
       {assets.map((asset) => (
         <div key={asset._id} className="border rounded-lg p-4">
           <div className="flex justify-between items-start">
-            <div>
+            <Link href={`/assets/${asset._id}`} className="hover:underline">
               <div className="font-mono text-sm text-gray-500">{asset._id}</div>
               <div className="font-medium">{asset.kind}</div>
-            </div>
+            </Link>
             <span className={`text-xs px-2 py-1 rounded-full ${STATUS_STYLES[asset.status]}`}>{asset.status}</span>
           </div>
           {asset.currentHolderId && <div className="text-sm text-gray-600 mt-2">Held by {asset.currentHolderId}</div>}
