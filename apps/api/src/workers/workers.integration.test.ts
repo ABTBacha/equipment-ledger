@@ -56,4 +56,24 @@ describe('WorkersService', () => {
   it('findOne throws NotFoundException for an unknown worker', async () => {
     await expect(service.findOne('nope')).rejects.toThrow(/not found/i);
   });
+
+  it('findAll reports each worker\'s currently held assets without an N+1 query per worker', async () => {
+    await workerModel.create({ _id: 'worker-findall-holder', name: 'Cara Diaz', certifications: [] });
+    await workerModel.create({ _id: 'worker-findall-empty', name: 'Dev Singh', certifications: [] });
+    await assetModel.create({ _id: 'TESTASSET-FINDALL-1', kind: 'drill', requiresCertification: null });
+    await assetModel.create({ _id: 'TESTASSET-FINDALL-2', kind: 'drill', requiresCertification: null });
+    await movementsService.issue({ assetId: 'TESTASSET-FINDALL-1', workerId: 'worker-findall-holder', idempotencyKey: 'wk-issue-2' });
+    await movementsService.issue({ assetId: 'TESTASSET-FINDALL-2', workerId: 'worker-findall-holder', idempotencyKey: 'wk-issue-3' });
+
+    const findSpy = jest.spyOn(assetModel, 'find');
+    const workers = await service.findAll();
+    // AssetsService.findAll() should be called exactly once for the whole list, not once per worker.
+    expect(findSpy).toHaveBeenCalledTimes(1);
+    findSpy.mockRestore();
+
+    const cara = workers.find((w) => w._id === 'worker-findall-holder')!;
+    const dev = workers.find((w) => w._id === 'worker-findall-empty')!;
+    expect(cara.currentlyHolding.map((a) => a._id).sort()).toEqual(['TESTASSET-FINDALL-1', 'TESTASSET-FINDALL-2']);
+    expect(dev.currentlyHolding).toEqual([]);
+  });
 });

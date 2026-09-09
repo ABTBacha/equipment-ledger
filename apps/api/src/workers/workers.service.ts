@@ -6,11 +6,14 @@ import { Reservation } from '../schemas/reservation.schema';
 import { AssetsService, AssetSummary } from '../assets/assets.service';
 import { ReservationResult, RawReservationDoc, toReservationResult } from '../reservations/reservation-result';
 
-export interface WorkerSummary {
+export interface WorkerListItem {
   _id: string;
   name: string;
   certifications: { code: string; expiresAt: Date }[];
   currentlyHolding: AssetSummary[];
+}
+
+export interface WorkerSummary extends WorkerListItem {
   reservations: ReservationResult[];
 }
 
@@ -22,8 +25,25 @@ export class WorkersService {
     private readonly assetsService: AssetsService,
   ) {}
 
-  async findAll(): Promise<Worker[]> {
-    return this.workerModel.find({}).lean();
+  async findAll(): Promise<WorkerListItem[]> {
+    const workers = await this.workerModel.find({}).lean();
+    // Single pass over the (already batch-computed) asset list rather than one
+    // query per worker, mirroring AssetsService.findAll()'s aggregation approach.
+    const allAssets = await this.assetsService.findAll();
+    const holdingByWorker = new Map<string, AssetSummary[]>();
+    for (const asset of allAssets) {
+      if (!asset.currentHolderId) continue;
+      const list = holdingByWorker.get(asset.currentHolderId);
+      if (list) list.push(asset);
+      else holdingByWorker.set(asset.currentHolderId, [asset]);
+    }
+
+    return workers.map((w) => ({
+      _id: w._id,
+      name: w.name,
+      certifications: w.certifications,
+      currentlyHolding: holdingByWorker.get(w._id) ?? [],
+    }));
   }
 
   async findOne(id: string): Promise<WorkerSummary> {
