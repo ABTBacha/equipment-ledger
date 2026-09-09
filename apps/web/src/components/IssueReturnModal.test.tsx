@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { IssueReturnModal } from './IssueReturnModal';
+import { ToastProvider } from './ToastProvider';
 import { apiFetch } from '../lib/api';
 
 jest.mock('../lib/api', () => ({
@@ -57,5 +58,27 @@ describe('IssueReturnModal idempotency key', () => {
     const secondKey = JSON.parse((apiFetch as jest.Mock).mock.calls[1][1].body).idempotencyKey;
 
     expect(secondKey).not.toBe(firstKey);
+  });
+});
+
+describe('IssueReturnModal toast on success', () => {
+  beforeEach(() => {
+    (apiFetch as jest.Mock).mockReset();
+  });
+
+  it('shows a toast with the expected message after a successful issue, when wrapped in a real ToastProvider', async () => {
+    (apiFetch as jest.Mock).mockResolvedValue({});
+
+    render(
+      <ToastProvider>
+        <IssueReturnModal asset={asset} action="issue" onClose={jest.fn()} />
+      </ToastProvider>,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Worker ID'), { target: { value: 'worker-9' } });
+    fireEvent.click(screen.getByText('Confirm'));
+
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('Issued to worker-9')).toBeInTheDocument();
   });
 });
