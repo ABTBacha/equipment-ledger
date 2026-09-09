@@ -13,11 +13,11 @@ export default async function WorkersPage() {
   const workers = await fetchWorkers();
   return (
     <main className="p-8 max-w-3xl mx-auto">
-      <h1 className="text-2xl font-semibold mb-6">Workers</h1>
+      <h1 className="text-2xl font-semibold mb-6 text-primary">Workers</h1>
       <ul className="space-y-2">
         {workers.map((w) => (
           <li key={w._id}>
-            <Link href={`/workers/${w._id}`} className="text-blue-600 hover:underline">
+            <Link href={`/workers/${w._id}`} className="text-accent-blue hover:underline">
               {w.name}
             </Link>
           </li>

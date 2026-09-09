@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { apiFetch, getCurrentKeeper, newIdempotencyKey } from '../lib/api';
 import { AssetSummary } from './StoreGrid';
+import { useToast } from './ToastProvider';
 
 export function IssueReturnModal({
   asset,
@@ -13,6 +14,7 @@ export function IssueReturnModal({
   action: 'issue' | 'return';
   onClose: () => void;
 }) {
+  const { showToast } = useToast();
   const [idempotencyKey] = useState(() => newIdempotencyKey());
   const [workerId, setWorkerId] = useState('');
   const [occurredAt, setOccurredAt] = useState('');
@@ -34,6 +36,7 @@ export function IssueReturnModal({
           loggedBy: getCurrentKeeper() ?? undefined,
         }),
       });
+      showToast(action === 'issue' ? `Issued to ${workerId}` : 'Returned');
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
@@ -42,9 +45,9 @@ export function IssueReturnModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center" role="dialog" aria-modal="true">
-      <div className="bg-white rounded-lg p-6 w-full max-w-sm">
-        <h2 className="text-lg font-semibold mb-4">
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center" role="dialog" aria-modal="true">
+      <div className="bg-raised border border-hairline p-6 w-full max-w-sm">
+        <h2 className="text-lg font-semibold mb-4 text-primary">
           {action === 'issue' ? 'Issue' : 'Return'} {asset._id}
         </h2>
         <input
@@ -52,27 +55,32 @@ export function IssueReturnModal({
           placeholder="Worker ID"
           value={workerId}
           onChange={(e) => setWorkerId(e.target.value)}
-          className="border rounded px-3 py-2 w-full mb-3"
+          className="border border-hairline bg-surface px-3 py-2 w-full mb-3 text-primary placeholder:text-muted"
           disabled={submitting}
         />
-        <label className="block text-sm mb-1">Occurred at (leave blank for now)</label>
+        <label className="block text-sm mb-1 text-muted">Occurred at (leave blank for now)</label>
         <input
           type="datetime-local"
           value={occurredAt}
           onChange={(e) => setOccurredAt(e.target.value)}
-          className="border rounded px-3 py-2 w-full mb-3"
+          className="border border-hairline bg-surface px-3 py-2 w-full mb-3 text-primary"
           disabled={submitting}
         />
-        {error && <div className="text-sm text-red-600 mb-3">{error}</div>}
+        {error && <div className="text-sm text-accent-red mb-3">{error}</div>}
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} disabled={submitting} className="px-3 py-1 border rounded">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            className="px-3 py-1 border border-hairline text-primary hover:bg-surface"
+          >
             Cancel
           </button>
           <button
             type="button"
             onClick={submit}
             disabled={submitting || !workerId}
-            className="px-3 py-1 border rounded bg-blue-600 text-white disabled:opacity-50"
+            className="px-3 py-1 border border-hairline bg-accent-blue text-primary disabled:opacity-50"
           >
             Confirm
           </button>
