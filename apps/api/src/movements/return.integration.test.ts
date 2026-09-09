@@ -98,6 +98,14 @@ describe('MovementsService.return', () => {
     expect(asset?.status).toBe(AssetStatus.OUT_OF_SERVICE);
     const movements = await movementModel.find({ assetId: 'DRILL-005', type: { $in: ['RETURN', 'OUT_OF_SERVICE'] } }).lean();
     expect(movements).toHaveLength(2);
+
+    // The pairing's ordering must be correct by construction (occurredAt), not by incidental
+    // ObjectId insertion order: the OUT_OF_SERVICE movement's occurredAt must be strictly
+    // after the RETURN movement's occurredAt, so replay's timestamp comparison alone (no
+    // tiebreak needed) puts RETURN before OUT_OF_SERVICE.
+    const returnMovement = movements.find((m) => m.type === 'RETURN')!;
+    const outOfServiceMovement = movements.find((m) => m.type === 'OUT_OF_SERVICE')!;
+    expect(outOfServiceMovement.occurredAt.getTime()).toBe(returnMovement.occurredAt.getTime() + 1);
   });
 
   it('replays the same result instead of conflicting when two simultaneous return requests share the same idempotencyKey (double-click)', async () => {

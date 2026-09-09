@@ -27,13 +27,18 @@ export interface RawReservationDoc {
 }
 
 export function toReservationResult(doc: RawReservationDoc): ReservationResult {
+  // EXPIRED is a read-time computed view, not a stored status: a reservation that never
+  // got fulfilled or cancelled and whose window has simply passed should read as EXPIRED
+  // everywhere it's returned, without ever mutating the stored document (matching the
+  // README's "computed lazily on read" description).
+  const status = doc.status === ReservationStatus.ACTIVE && doc.endAt.getTime() < Date.now() ? ReservationStatus.EXPIRED : doc.status;
   return {
     _id: doc._id.toString(),
     assetId: doc.assetId,
     workerId: doc.workerId,
     startAt: doc.startAt,
     endAt: doc.endAt,
-    status: doc.status,
+    status,
     idempotencyKey: doc.idempotencyKey,
   };
 }

@@ -54,6 +54,7 @@ describe('MovementsService.correct', () => {
     expect(String(correction.assetId)).toBe('DRILL-001');
     expect(new Date(correction.occurredAt).toISOString()).toBe('2026-08-01T09:15:00.000Z');
     expect(correction.correctionOf).toBe(String(original._id));
+    expect(correction.reason).toBe('Logged the wrong minute');
 
     const reloadedOriginal = await movementModel.findById(original._id).lean();
     expect(String(reloadedOriginal?.correctedBy)).toBe(String(correction._id));
@@ -118,5 +119,25 @@ describe('MovementsService.correct', () => {
 
     const reloadedOriginal = await movementModel.findById(original._id).lean();
     expect(String(reloadedOriginal?.correctedBy)).toBe(String(a._id));
+  });
+
+  it('persists loggedBy end-to-end from issue and correct through to the stored Movement document', async () => {
+    const original = await service.issue({
+      assetId: 'DRILL-001',
+      workerId: 'worker-1',
+      occurredAt: '2026-08-01T09:00:00Z',
+      idempotencyKey: 'c-issue-logged',
+      loggedBy: 'Priya Patel',
+    });
+    const storedIssue = await movementModel.findById(original._id).lean();
+    expect(storedIssue?.loggedBy).toBe('Priya Patel');
+
+    const correction = await service.correct(String(original._id), {
+      occurredAt: '2026-08-01T09:15:00Z',
+      idempotencyKey: 'c-correct-logged',
+      loggedBy: 'Marcus Webb',
+    });
+    const storedCorrection = await movementModel.findById(correction._id).lean();
+    expect(storedCorrection?.loggedBy).toBe('Marcus Webb');
   });
 });

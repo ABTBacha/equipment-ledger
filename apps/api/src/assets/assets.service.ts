@@ -61,6 +61,7 @@ export class AssetsService {
         occurredAt: dto.occurredAt,
         idempotencyKey: dto.idempotencyKey,
         outOfService: true,
+        loggedBy: dto.loggedBy,
       });
     }
 
@@ -70,7 +71,7 @@ export class AssetsService {
 
     const occurredAt = dto.occurredAt ? new Date(dto.occurredAt) : new Date();
     const { result } = await withIdempotency(this.movementModel, dto.idempotencyKey, () =>
-      withRetries(() => this.executeTakeOutOfServiceInStore(assetId, occurredAt, dto.reason ?? null, dto.idempotencyKey)),
+      withRetries(() => this.executeTakeOutOfServiceInStore(assetId, occurredAt, dto.reason ?? null, dto.idempotencyKey, dto.loggedBy ?? null)),
     );
     return toMovementResult(result);
   }
@@ -80,6 +81,7 @@ export class AssetsService {
     occurredAt: Date,
     reason: string | null,
     idempotencyKey: string,
+    loggedBy: string | null,
   ): Promise<RawMovementDoc> {
     const session = await this.connection.startSession();
     try {
@@ -136,6 +138,7 @@ export class AssetsService {
               correctionOf: null,
               correctedBy: null,
               reason,
+              loggedBy,
             },
           ],
           { session },
@@ -151,12 +154,17 @@ export class AssetsService {
   async bringBackIntoService(assetId: string, dto: BringBackIntoServiceDto): Promise<MovementResult> {
     const occurredAt = dto.occurredAt ? new Date(dto.occurredAt) : new Date();
     const { result } = await withIdempotency(this.movementModel, dto.idempotencyKey, () =>
-      withRetries(() => this.executeBringBackIntoService(assetId, occurredAt, dto.idempotencyKey)),
+      withRetries(() => this.executeBringBackIntoService(assetId, occurredAt, dto.idempotencyKey, dto.loggedBy ?? null)),
     );
     return toMovementResult(result);
   }
 
-  private async executeBringBackIntoService(assetId: string, occurredAt: Date, idempotencyKey: string): Promise<RawMovementDoc> {
+  private async executeBringBackIntoService(
+    assetId: string,
+    occurredAt: Date,
+    idempotencyKey: string,
+    loggedBy: string | null,
+  ): Promise<RawMovementDoc> {
     const session = await this.connection.startSession();
     try {
       return await session.withTransaction(async () => {
@@ -191,6 +199,7 @@ export class AssetsService {
               correctionOf: null,
               correctedBy: null,
               reason: null,
+              loggedBy,
             },
           ],
           { session },

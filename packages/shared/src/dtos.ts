@@ -6,6 +6,7 @@ export const IssueMovementSchema = z.object({
   occurredAt: z.string().datetime().optional(),
   idempotencyKey: z.string().min(1),
   reservationId: z.string().min(1).optional(),
+  loggedBy: z.string().min(1).optional(),
 });
 export type IssueMovementDto = z.infer<typeof IssueMovementSchema>;
 
@@ -15,6 +16,7 @@ export const ReturnMovementSchema = z.object({
   occurredAt: z.string().datetime().optional(),
   idempotencyKey: z.string().min(1),
   outOfService: z.boolean().optional(),
+  loggedBy: z.string().min(1).optional(),
 });
 export type ReturnMovementDto = z.infer<typeof ReturnMovementSchema>;
 
@@ -22,6 +24,7 @@ export const CorrectMovementSchema = z.object({
   occurredAt: z.string().datetime().optional(),
   reason: z.string().min(1).optional(),
   idempotencyKey: z.string().min(1),
+  loggedBy: z.string().min(1).optional(),
 }).refine((data) => data.occurredAt !== undefined || data.reason !== undefined, {
   message: 'At least one of occurredAt or reason must be provided',
 });
@@ -43,11 +46,13 @@ export const TakeOutOfServiceSchema = z.object({
   occurredAt: z.string().datetime().optional(),
   reason: z.string().min(1).optional(),
   idempotencyKey: z.string().min(1),
+  loggedBy: z.string().min(1).optional(),
 });
 export type TakeOutOfServiceDto = z.infer<typeof TakeOutOfServiceSchema>;
 
 export const BringBackIntoServiceSchema = z.object({
   occurredAt: z.string().datetime().optional(),
   idempotencyKey: z.string().min(1),
+  loggedBy: z.string().min(1).optional(),
 });
 export type BringBackIntoServiceDto = z.infer<typeof BringBackIntoServiceSchema>;

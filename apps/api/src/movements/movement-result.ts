@@ -10,6 +10,7 @@ export interface MovementResult {
   recordedAt: Date;
   idempotencyKey: string;
   correctionOf: string | null;
+  reason: string | null;
 }
 
 /**
@@ -26,6 +27,7 @@ export interface RawMovementDoc {
   recordedAt: Date;
   idempotencyKey: string;
   correctionOf: Types.ObjectId | string | null;
+  reason: string | null;
 }
 
 export function toMovementResult(doc: RawMovementDoc): MovementResult {
@@ -38,5 +40,6 @@ export function toMovementResult(doc: RawMovementDoc): MovementResult {
     recordedAt: doc.recordedAt,
     idempotencyKey: doc.idempotencyKey,
     correctionOf: doc.correctionOf ? doc.correctionOf.toString() : null,
+    reason: doc.reason ?? null,
   };
 }

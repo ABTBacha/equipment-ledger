@@ -87,6 +87,7 @@ export class MovementsService {
               correctionOf: null,
               correctedBy: null,
               reason: null,
+              loggedBy: dto.loggedBy ?? null,
             },
           ],
           { session },
@@ -190,6 +191,7 @@ export class MovementsService {
               correctionOf: null,
               correctedBy: null,
               reason: null,
+              loggedBy: dto.loggedBy ?? null,
             },
           ],
           { session },
@@ -229,12 +231,19 @@ export class MovementsService {
                 assetId: dto.assetId,
                 workerId: dto.workerId,
                 type: MovementType.OUT_OF_SERVICE,
-                occurredAt,
+                // Deliberately 1ms after the RETURN movement's occurredAt (not identical):
+                // the replay algorithm's tiebreak for equal timestamps falls back to
+                // lexicographic ObjectId comparison, which happens to produce the correct
+                // order here today only incidentally. Giving OUT_OF_SERVICE a strictly later
+                // timestamp makes "RETURN then OUT_OF_SERVICE" the correct replay order by
+                // construction, not by luck.
+                occurredAt: new Date(occurredAt.getTime() + 1),
                 recordedAt: new Date(),
                 idempotencyKey: `${dto.idempotencyKey}-oos`,
                 correctionOf: null,
                 correctedBy: null,
                 reason: 'Returned damaged',
+                loggedBy: dto.loggedBy ?? null,
               },
             ],
             { session },
@@ -301,6 +310,7 @@ export class MovementsService {
               correctionOf: original._id,
               correctedBy: null,
               reason: dto.reason ?? null,
+              loggedBy: dto.loggedBy ?? null,
             },
           ],
           { session },
