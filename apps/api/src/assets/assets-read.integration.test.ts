@@ -55,6 +55,31 @@ describe('AssetsService reads', () => {
     expect(drill?.upcomingReservation?.workerId).toBe('worker-1');
   });
 
+  it('findAll reports lastActivityAt as the latest movement occurredAt, or null with no movements', async () => {
+    await assetModel.create({ _id: 'DRILL-003', kind: 'drill', requiresCertification: null });
+    await assetModel.create({ _id: 'DRILL-004', kind: 'drill', requiresCertification: null });
+
+    await service['movementsService'].issue({
+      assetId: 'DRILL-003',
+      workerId: 'worker-1',
+      occurredAt: '2026-08-01T09:00:00Z',
+      idempotencyKey: 'activity-issue-1',
+    });
+    await service['movementsService'].return({
+      assetId: 'DRILL-003',
+      workerId: 'worker-1',
+      occurredAt: '2026-08-02T09:00:00Z',
+      idempotencyKey: 'activity-return-1',
+    });
+
+    const all = await service.findAll();
+    const withActivity = all.find((a) => a._id === 'DRILL-003');
+    const withoutActivity = all.find((a) => a._id === 'DRILL-004');
+
+    expect(withActivity?.lastActivityAt).toEqual(new Date('2026-08-02T09:00:00Z'));
+    expect(withoutActivity?.lastActivityAt).toBeNull();
+  });
+
   it('findOne throws NotFoundException for an unknown asset', async () => {
     await expect(service.findOne('NOPE-001')).rejects.toThrow(/not found/i);
   });

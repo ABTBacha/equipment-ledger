@@ -18,6 +18,7 @@ export interface AssetSummary {
   status: AssetStatus;
   currentHolderId: string | null;
   upcomingReservation: { startAt: Date; endAt: Date; workerId: string } | null;
+  lastActivityAt: Date | null;
 }
 
 export interface HistoryEntry {
@@ -225,6 +226,8 @@ export class AssetsService {
       if (!nearestByAsset.has(r.assetId)) nearestByAsset.set(r.assetId, r);
     }
 
+    const lastActivityByAsset = await this.getLastActivityByAsset();
+
     return assets.map((a) => {
       const nearest = nearestByAsset.get(a._id);
       return {
@@ -234,8 +237,20 @@ export class AssetsService {
         status: a.status,
         currentHolderId: a.currentHolderId,
         upcomingReservation: nearest ? { startAt: nearest.startAt, endAt: nearest.endAt, workerId: nearest.workerId } : null,
+        lastActivityAt: lastActivityByAsset.get(a._id) ?? null,
       };
     });
+  }
+
+  /**
+   * Single aggregation over the movements collection, grouping by assetId and
+   * taking the max occurredAt, rather than one query per asset (N+1).
+   */
+  private async getLastActivityByAsset(): Promise<Map<string, Date>> {
+    const rows = await this.movementModel.aggregate<{ _id: string; lastActivityAt: Date }>([
+      { $group: { _id: '$assetId', lastActivityAt: { $max: '$occurredAt' } } },
+    ]);
+    return new Map(rows.map((r) => [r._id, r.lastActivityAt]));
   }
 
   async findOne(id: string): Promise<AssetSummary> {
