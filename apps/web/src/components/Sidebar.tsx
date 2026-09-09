@@ -6,6 +6,8 @@ import { LayoutGrid, Users, CalendarClock, History } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { getCurrentKeeper } from '../lib/api';
 
+const KEEPER_STORAGE_KEY = 'equipment-ledger:keeper';
+
 const NAV_ITEMS = [
   { href: '/', label: 'Dashboard', icon: LayoutGrid },
   { href: '/workers', label: 'Workers', icon: Users },
@@ -20,6 +22,15 @@ export function Sidebar() {
   useEffect(() => {
     setKeeper(getCurrentKeeper());
   }, []);
+
+  const switchKeeper = () => {
+    try {
+      window.localStorage.removeItem(KEEPER_STORAGE_KEY);
+    } catch {
+      // Storage may be unavailable (private browsing); reload still resets KeeperGate's state.
+    }
+    window.location.reload();
+  };
 
   return (
     <aside className="w-[220px] shrink-0 bg-raised border-r border-hairline flex flex-col h-screen sticky top-0">
@@ -45,7 +56,16 @@ export function Sidebar() {
       </nav>
       <div className="px-4 py-4 border-t border-hairline">
         <div className="text-xs text-muted">On the hatch</div>
-        <div className="text-sm text-primary truncate">{keeper ?? '—'}</div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-sm text-primary truncate">{keeper ?? '—'}</div>
+          <button
+            type="button"
+            onClick={switchKeeper}
+            className="text-xs text-accent-blue hover:underline shrink-0"
+          >
+            Switch
+          </button>
+        </div>
       </div>
     </aside>
   );
