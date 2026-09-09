@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { ReservationForm } from '../../components/ReservationForm';
-import { ReservationView } from '../../lib/types';
+import { ReservationView, RESERVATION_STATUS_LABEL } from '../../lib/types';
 
 export function ReservationsClient({ reservations }: { reservations: ReservationView[] }) {
   const router = useRouter();
@@ -14,7 +14,7 @@ export function ReservationsClient({ reservations }: { reservations: Reservation
         {reservations.map((r) => (
           <li key={r._id} className="text-sm border border-hairline bg-surface p-3 text-primary">
             <span className="font-mono">{r.assetId}</span> — {r.workerId}: {new Date(r.startAt).toLocaleString()} –{' '}
-            {new Date(r.endAt).toLocaleString()} ({r.status})
+            {new Date(r.endAt).toLocaleString()} ({RESERVATION_STATUS_LABEL[r.status]})
           </li>
         ))}
       </ul>

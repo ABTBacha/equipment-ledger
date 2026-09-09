@@ -1,4 +1,4 @@
-import { WorkerDetailView } from '../../../lib/types';
+import { WorkerDetailView, RESERVATION_STATUS_LABEL } from '../../../lib/types';
 import { CertificationList } from '../../../components/CertificationList';
 import { StoreGrid } from '../../../components/StoreGrid';
 
@@ -28,7 +28,7 @@ export default async function WorkerDetailPage({ params }: { params: { id: strin
         {worker.reservations.map((r) => (
           <li key={r._id} className="text-sm border border-hairline bg-surface p-3 text-primary">
             <span className="font-mono">{r.assetId}</span>: {new Date(r.startAt).toLocaleString()} –{' '}
-            {new Date(r.endAt).toLocaleString()} ({r.status})
+            {new Date(r.endAt).toLocaleString()} ({RESERVATION_STATUS_LABEL[r.status]})
           </li>
         ))}
       </ul>

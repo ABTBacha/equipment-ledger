@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { CorrectMovementForm } from './CorrectMovementForm';
-import { HistoryEntryView } from '../lib/types';
+import { HistoryEntryView, MOVEMENT_TYPE_LABEL } from '../lib/types';
 
 export function HistoryTimeline({ entries, onCorrected }: { entries: HistoryEntryView[]; onCorrected: () => void }) {
   const [correctingId, setCorrectingId] = useState<string | null>(null);
@@ -13,7 +13,7 @@ export function HistoryTimeline({ entries, onCorrected }: { entries: HistoryEntr
         <li key={entry.movement._id} className="border border-hairline bg-surface p-4">
           <div className="flex justify-between items-start">
             <div>
-              <div className="font-medium text-primary">{entry.movement.type}</div>
+              <div className="font-medium text-primary">{MOVEMENT_TYPE_LABEL[entry.movement.type]}</div>
               <div className="text-sm text-muted font-mono">
                 occurred {new Date(entry.movement.occurredAt).toLocaleString()}
               </div>
@@ -29,8 +29,8 @@ export function HistoryTimeline({ entries, onCorrected }: { entries: HistoryEntr
             )}
           </div>
           {entry.correction && (
-            <div className="mt-2 pl-4 border-l-2 border-accent-amber text-sm">
-              <div className="text-accent-amber font-medium">Corrected</div>
+            <div className="mt-2 pl-4 border-l-2 border-accent-blue text-sm">
+              <div className="text-accent-blue font-medium">Corrected</div>
               <div className="text-primary font-mono">
                 now recorded as occurring {new Date(entry.correction.occurredAt).toLocaleString()}
               </div>
