@@ -9,6 +9,7 @@ export interface ReservationResult {
   endAt: Date;
   status: ReservationStatus;
   idempotencyKey: string;
+  cancelReason: string | null;
 }
 
 /**
@@ -24,6 +25,7 @@ export interface RawReservationDoc {
   endAt: Date;
   status: ReservationStatus;
   idempotencyKey: string;
+  cancelReason?: string | null;
 }
 
 export function toReservationResult(doc: RawReservationDoc): ReservationResult {
@@ -40,5 +42,6 @@ export function toReservationResult(doc: RawReservationDoc): ReservationResult {
     endAt: doc.endAt,
     status,
     idempotencyKey: doc.idempotencyKey,
+    cancelReason: doc.cancelReason ?? null,
   };
 }

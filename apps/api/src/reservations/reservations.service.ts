@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
-import { Connection, Model } from 'mongoose';
-import { AssetStatus, CreateReservationDto, ReservationStatus } from '@equipment-ledger/shared';
+import { Connection, Model, Types } from 'mongoose';
+import { AssetStatus, CancelReservationDto, CreateReservationDto, ReservationStatus } from '@equipment-ledger/shared';
 import { Asset } from '../schemas/asset.schema';
 import { Reservation } from '../schemas/reservation.schema';
 import { AssetLock } from '../schemas/asset-lock.schema';
@@ -34,6 +34,44 @@ export class ReservationsService {
       withRetries(() => this.executeReserve(dto, startAt, endAt)),
     );
     return toReservationResult(result);
+  }
+
+  /**
+   * Cancelling is a soft transition, never a delete: the row stays in the collection with
+   * status CANCELLED and its reason, so "what was booked and then called off" remains
+   * answerable — the same principle as correcting a movement rather than editing it.
+   *
+   * The window is freed as a side effect: overlap detection in `executeReserve` only ever
+   * considers status ACTIVE reservations, so nothing else has to change.
+   *
+   * Concurrency needs no transaction here. This is a compare-and-set on a single document
+   * (`status: ACTIVE` in the filter), so two simultaneous cancels can't both win — the loser
+   * matches nothing and reports the conflict.
+   */
+  async cancel(id: string, dto: CancelReservationDto): Promise<ReservationResult> {
+    // An id that isn't a valid ObjectId would make Mongoose throw a CastError (a 500) rather
+    // than report the reservation as missing, which is what it actually is.
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException(`Reservation ${id} not found`);
+    }
+
+    const cancelled = await this.reservationModel
+      .findOneAndUpdate(
+        // `endAt` is part of the filter because an ACTIVE reservation whose window has passed
+        // reads as EXPIRED everywhere (see toReservationResult); cancelling one would
+        // contradict what the caller was looking at.
+        { _id: id, status: ReservationStatus.ACTIVE, endAt: { $gt: new Date() } },
+        { $set: { status: ReservationStatus.CANCELLED, cancelReason: dto.reason ?? null } },
+        { new: true },
+      )
+      .lean();
+
+    if (cancelled) return toReservationResult(cancelled as unknown as RawReservationDoc);
+
+    const existing = await this.reservationModel.findById(id).lean();
+    if (!existing) throw new NotFoundException(`Reservation ${id} not found`);
+    const current = toReservationResult(existing as unknown as RawReservationDoc);
+    throw new ConflictException(`Reservation ${id} is not active (status ${current.status}) and cannot be cancelled`);
   }
 
   async findAll(): Promise<ReservationResult[]> {
@@ -89,10 +127,23 @@ export class ReservationsService {
           // transaction's session: this transaction's snapshot may have been
           // established before the winner committed, so a session-scoped read here
           // could still see nothing even though the winner has already committed.
-          return replayOrThrow<RawReservationDoc>(this.reservationModel, dto.idempotencyKey, () =>
-            new ConflictException(
-              `Overlaps an existing reservation from ${conflicting.startAt.toISOString()} to ${conflicting.endAt.toISOString()}`,
-            ),
+          return replayOrThrow<RawReservationDoc>(
+            this.reservationModel,
+            dto.idempotencyKey,
+            () =>
+              // The window is carried as structured `conflict` data, not only interpolated
+              // into `message`, so the browser can render it in the viewer's own timezone.
+              // `message` keeps the ISO form as the fallback for non-browser API clients.
+              new ConflictException({
+                statusCode: 409,
+                error: 'Conflict',
+                code: 'RESERVATION_OVERLAP',
+                message: `Overlaps an existing reservation from ${conflicting.startAt.toISOString()} to ${conflicting.endAt.toISOString()}`,
+                conflict: {
+                  startAt: conflicting.startAt.toISOString(),
+                  endAt: conflicting.endAt.toISOString(),
+                },
+              }),
           );
         }
 

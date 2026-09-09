@@ -76,4 +76,90 @@ describe('WorkersService', () => {
     expect(cara.currentlyHolding.map((a) => a._id).sort()).toEqual(['TESTASSET-FINDALL-1', 'TESTASSET-FINDALL-2']);
     expect(dev.currentlyHolding).toEqual([]);
   });
+
+  describe('certifications', () => {
+    beforeEach(async () => {
+      await workerModel.deleteMany({ _id: 'worker-certs' });
+      await workerModel.create({ _id: 'worker-certs', name: 'Erin Falk', certifications: [] });
+    });
+
+    it('adds a certification the worker does not yet hold', async () => {
+      const worker = await service.upsertCertification('worker-certs', {
+        code: 'FORKLIFT',
+        expiresAt: '2028-01-01T00:00:00.000Z',
+      });
+
+      expect(worker.certifications).toEqual([{ code: 'FORKLIFT', expiresAt: new Date('2028-01-01T00:00:00.000Z') }]);
+    });
+
+    it('renews a certification the worker already holds, in place, rather than duplicating the code', async () => {
+      await service.upsertCertification('worker-certs', { code: 'FORKLIFT', expiresAt: '2020-01-01T00:00:00.000Z' });
+
+      const worker = await service.upsertCertification('worker-certs', {
+        code: 'FORKLIFT',
+        expiresAt: '2029-06-30T00:00:00.000Z',
+      });
+
+      expect(worker.certifications).toEqual([{ code: 'FORKLIFT', expiresAt: new Date('2029-06-30T00:00:00.000Z') }]);
+    });
+
+    it('leaves the worker\'s other certifications untouched when renewing one', async () => {
+      await service.upsertCertification('worker-certs', { code: 'FORKLIFT', expiresAt: '2028-01-01T00:00:00.000Z' });
+      await service.upsertCertification('worker-certs', { code: 'GAS-DETECT', expiresAt: '2028-02-01T00:00:00.000Z' });
+
+      const worker = await service.upsertCertification('worker-certs', {
+        code: 'FORKLIFT',
+        expiresAt: '2030-01-01T00:00:00.000Z',
+      });
+
+      expect(worker.certifications).toEqual([
+        { code: 'FORKLIFT', expiresAt: new Date('2030-01-01T00:00:00.000Z') },
+        { code: 'GAS-DETECT', expiresAt: new Date('2028-02-01T00:00:00.000Z') },
+      ]);
+    });
+
+    it('removes a certification by code', async () => {
+      await service.upsertCertification('worker-certs', { code: 'FORKLIFT', expiresAt: '2028-01-01T00:00:00.000Z' });
+      await service.upsertCertification('worker-certs', { code: 'GAS-DETECT', expiresAt: '2028-02-01T00:00:00.000Z' });
+
+      const worker = await service.removeCertification('worker-certs', 'FORKLIFT');
+
+      expect(worker.certifications.map((c) => c.code)).toEqual(['GAS-DETECT']);
+    });
+
+    it('unblocks a cert-gated issue once an expired certification is renewed', async () => {
+      await service.upsertCertification('worker-certs', { code: 'FORKLIFT', expiresAt: '2020-01-01T00:00:00.000Z' });
+      await assetModel.deleteMany({ _id: 'FORK-001' });
+      await assetModel.create({ _id: 'FORK-001', kind: 'forklift', requiresCertification: 'FORKLIFT' });
+
+      await expect(
+        movementsService.issue({ assetId: 'FORK-001', workerId: 'worker-certs', idempotencyKey: 'cert-issue-1' }),
+      ).rejects.toThrow(/expired/i);
+
+      await service.upsertCertification('worker-certs', { code: 'FORKLIFT', expiresAt: '2029-01-01T00:00:00.000Z' });
+
+      const movement = await movementsService.issue({
+        assetId: 'FORK-001',
+        workerId: 'worker-certs',
+        idempotencyKey: 'cert-issue-2',
+      });
+      expect(movement.type).toBe('ISSUE');
+    });
+
+    it('rejects adding a certification to an unknown worker', async () => {
+      await expect(
+        service.upsertCertification('nobody', { code: 'FORKLIFT', expiresAt: '2028-01-01T00:00:00.000Z' }),
+      ).rejects.toThrow(/not found/i);
+    });
+
+    it('rejects removing a certification the worker does not hold', async () => {
+      await expect(service.removeCertification('worker-certs', 'FORKLIFT')).rejects.toThrow(
+        /does not hold certification FORKLIFT/i,
+      );
+    });
+
+    it('rejects removing a certification from an unknown worker', async () => {
+      await expect(service.removeCertification('nobody', 'FORKLIFT')).rejects.toThrow(/not found/i);
+    });
+  });
 });

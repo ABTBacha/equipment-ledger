@@ -42,6 +42,18 @@ export const CreateReservationSchema = z.object({
 });
 export type CreateReservationDto = z.infer<typeof CreateReservationSchema>;
 
+export const UpsertCertificationSchema = z.object({
+  code: z.string().min(1),
+  expiresAt: z.string().datetime(),
+});
+export type UpsertCertificationDto = z.infer<typeof UpsertCertificationSchema>;
+
+export const CancelReservationSchema = z.object({
+  reason: z.string().min(1).optional(),
+  loggedBy: z.string().min(1).optional(),
+});
+export type CancelReservationDto = z.infer<typeof CancelReservationSchema>;
+
 export const TakeOutOfServiceSchema = z.object({
   occurredAt: z.string().datetime().optional(),
   reason: z.string().min(1).optional(),
