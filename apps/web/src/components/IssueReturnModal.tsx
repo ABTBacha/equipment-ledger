@@ -76,6 +76,7 @@ export function IssueReturnModal({
             placeholder="Select worker"
             disabled={submitting}
             aria-label="Worker"
+            fieldBackground="bg-surface"
           />
         </div>
         <label className="block text-sm mb-1 text-muted">Occurred at (leave blank for now)</label>

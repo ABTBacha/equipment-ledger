@@ -65,4 +65,42 @@ describe('SearchableSelect', () => {
     fireEvent.keyDown(input, { key: 'Escape' });
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
+
+  it('reopens the dropdown on a mouse click after Escape closed it (no new focus event fires)', () => {
+    render(<ControlledSelect />);
+    const input = screen.getByPlaceholderText('Search workers');
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+
+    // Input keeps focus after Escape, so a real click fires mousedown/click but no
+    // fresh `focus` event. Simulate that: mousedown only, no fireEvent.focus.
+    fireEvent.mouseDown(input);
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+  });
+
+  it('reopens the dropdown on a mouse click after a selection (no new focus event fires)', () => {
+    render(<ControlledSelect />);
+    const input = screen.getByPlaceholderText('Search workers');
+    fireEvent.focus(input);
+    fireEvent.click(screen.getByText('Ben Cole (worker-ben-cole)'));
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+
+    fireEvent.mouseDown(input);
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+  });
+
+  it('marks the keyboard-highlighted option with the accent-blue highlight classes', () => {
+    render(<ControlledSelect />);
+    const input = screen.getByPlaceholderText('Search workers');
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+
+    const highlighted = screen.getByText('Ben Cole (worker-ben-cole)').closest('button');
+    expect(highlighted).toHaveClass('border-accent-blue');
+    expect(highlighted).toHaveClass('text-accent-blue');
+
+    const notHighlighted = screen.getByText('Ana Rios (worker-ana-rios)').closest('button');
+    expect(notHighlighted).not.toHaveClass('border-accent-blue');
+  });
 });

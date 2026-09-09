@@ -14,7 +14,8 @@ function CertificationsCell({ worker }: { worker: WorkerSummaryView }) {
         return (
           <span key={cert.code}>
             {i > 0 && <span className="text-muted">, </span>}
-            <span className={expired ? 'text-accent-red' : 'text-primary'}>{cert.code}</span>
+            <span className="text-primary">{cert.code}</span>
+            {expired && <span className="text-accent-red font-medium"> (Expired)</span>}
           </span>
         );
       })}

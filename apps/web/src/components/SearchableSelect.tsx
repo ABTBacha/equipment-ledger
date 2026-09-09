@@ -14,6 +14,13 @@ interface SearchableSelectProps {
   placeholder?: string;
   disabled?: boolean;
   'aria-label'?: string;
+  /**
+   * Background utility class for the field itself. Every other input in the app uses
+   * whichever background reads as "raised" relative to its immediate container (a
+   * bg-surface panel gets bg-raised fields; a bg-raised panel, e.g. a modal, gets
+   * bg-surface fields) — defaults to bg-raised, the more common case.
+   */
+  fieldBackground?: string;
 }
 
 export function SearchableSelect({
@@ -23,12 +30,14 @@ export function SearchableSelect({
   placeholder = 'Search…',
   disabled,
   'aria-label': ariaLabel,
+  fieldBackground = 'bg-raised',
 }: SearchableSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const selected = options.find((o) => o.value === value) ?? null;
 
@@ -41,6 +50,11 @@ export function SearchableSelect({
   useEffect(() => {
     setHighlight(0);
   }, [query, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    optionRefs.current[highlight]?.scrollIntoView?.({ block: 'nearest' });
+  }, [highlight, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -103,13 +117,19 @@ export function SearchableSelect({
         placeholder={selected ? selected.label : placeholder}
         value={open ? query : ''}
         onFocus={openDropdown}
+        onMouseDown={() => {
+          // Selecting an option (or pressing Escape) closes the dropdown but keeps
+          // focus on the input, so a plain `focus` event never fires again on the
+          // next click. Reopen explicitly whenever the field is clicked while closed.
+          if (!open) openDropdown();
+        }}
         onChange={(e) => {
           setQuery(e.target.value);
           if (!open) setOpen(true);
         }}
         onKeyDown={onKeyDown}
         disabled={disabled}
-        className="border border-hairline bg-surface px-3 py-2 w-full text-primary placeholder:text-muted disabled:opacity-50"
+        className={`border border-hairline ${fieldBackground} px-3 py-2 w-full text-primary placeholder:text-muted disabled:opacity-50`}
       />
       {open && (
         <ul
@@ -122,6 +142,9 @@ export function SearchableSelect({
             filtered.map((option, i) => (
               <li key={option.value}>
                 <button
+                  ref={(el) => {
+                    optionRefs.current[i] = el;
+                  }}
                   type="button"
                   role="option"
                   aria-selected={option.value === value}
@@ -132,8 +155,10 @@ export function SearchableSelect({
                   }}
                   onClick={() => selectOption(option)}
                   onMouseEnter={() => setHighlight(i)}
-                  className={`w-full text-left px-3 py-2 text-sm text-primary ${
-                    i === highlight ? 'bg-raised' : 'bg-surface'
+                  className={`w-full text-left px-3 py-2 text-sm border-l-2 ${
+                    i === highlight
+                      ? 'bg-raised border-accent-blue text-accent-blue'
+                      : 'border-transparent bg-surface text-primary'
                   }`}
                 >
                   {option.label}
