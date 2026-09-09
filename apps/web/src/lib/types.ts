@@ -31,6 +31,7 @@ export interface WorkerSummaryView {
   _id: string;
   name: string;
   certifications: CertificationView[];
+  currentlyHolding: import('../components/StoreGrid').AssetSummary[];
 }
 
 export type ReservationStatus = 'ACTIVE' | 'CANCELLED' | 'FULFILLED' | 'EXPIRED';
@@ -52,6 +53,5 @@ export const RESERVATION_STATUS_LABEL: Record<ReservationStatus, string> = {
 };
 
 export interface WorkerDetailView extends WorkerSummaryView {
-  currentlyHolding: import('../components/StoreGrid').AssetSummary[];
   reservations: ReservationView[];
 }
