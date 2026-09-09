@@ -18,6 +18,11 @@ Next.js (App Router) + NestJS + MongoDB + TypeScript, in an npm workspaces monor
    npm run dev
    ```
    API on `http://localhost:4000`, web app on `http://localhost:3000`.
+3. (Optional) apply the versioned index migrations to a fresh environment:
+   ```bash
+   npm run migrate -w apps/api
+   ```
+   Mongoose's own `autoIndex` already creates the same indexes automatically in dev, so this isn't required to get the app working locally — it exists to give a fresh environment (e.g. a new deployment target) a versioned, explicit, repeatable path to the same schema, independent of whatever `autoIndex` happens to do.
 
 ## Seeding
 
@@ -76,6 +81,7 @@ MongoDB guarantees single-document updates are atomic. Under two simultaneous is
 - **No bitemporal "what did we believe at time T" queries** — only business-time ("what was actually true at time T") reconstruction, which is what the brief asks for. A system-time axis (tracking what the ledger *looked like* to a past query, before later corrections) would need every read to also pin a `recordedAt` cutoff, not just `occurredAt`.
 - **Reservation `EXPIRED` status is computed lazily on read**, not by a background job — there's nothing in this system that needs to fire on a schedule at this scale.
 - **No auth, roles, or permissions** — per the brief's own scope discipline. The keeper/worker "pick a name from a list" flow is cosmetic identification, not access control.
+- **Movement DTOs don't reject a future-dated `occurredAt`.** `IssueMovementDto`/`ReturnMovementDto`/etc. only validate that `occurredAt` is a well-formed timestamp, not that it's in the past — so a movement backdated into the future is technically reachable via the API (though not from any current UI or seed data), and in a contrived case could cause `check-invariants`' `replay-matches-live-state` check to report a mismatch, since it always replays "as of now." Known gap, not fixed in this pass.
 
 ## What I'd do with another day
 
