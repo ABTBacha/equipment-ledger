@@ -101,6 +101,7 @@ describe('AssetsService reads', () => {
       await service['movementsService'].issue({
         assetId: 'DRILL-030',
         workerId: 'worker-1',
+        occurredAt: '2026-08-01T09:00:00Z',
         dueAt: '2026-08-02T17:00:00Z',
         idempotencyKey: 'overdue-1',
       });
@@ -115,6 +116,7 @@ describe('AssetsService reads', () => {
       await service['movementsService'].issue({
         assetId: 'DRILL-031',
         workerId: 'worker-1',
+        occurredAt: new Date(Date.now() - 3 * 3600_000).toISOString(),
         dueAt: new Date(Date.now() - 3600_000).toISOString(),
         idempotencyKey: 'overdue-2',
       });
@@ -151,6 +153,7 @@ describe('AssetsService reads', () => {
       await service['movementsService'].issue({
         assetId: 'DRILL-034',
         workerId: 'worker-1',
+        occurredAt: new Date(Date.now() - 3 * 3600_000).toISOString(),
         dueAt: new Date(Date.now() - 3600_000).toISOString(),
         idempotencyKey: 'overdue-5',
       });

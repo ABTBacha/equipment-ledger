@@ -90,4 +90,61 @@ describe('ReservationList', () => {
     expect(screen.getByText(new RegExp(new Date('2027-01-10T09:00:00.000Z').toLocaleString(), 'i'))).toBeInTheDocument();
     expect(screen.queryByText(/2027-01-10T09:00:00\.000Z/)).not.toBeInTheDocument();
   });
+
+  it('lays the reservations out as a table', () => {
+    render(<ReservationList reservations={[reservation()]} onChanged={jest.fn()} />);
+
+    expect(screen.getByRole('columnheader', { name: 'Asset' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Worker' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'From' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'To' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Status' })).toBeInTheDocument();
+  });
+
+  it('drops the asset column where the list already belongs to one asset', () => {
+    render(<ReservationList reservations={[reservation()]} onChanged={jest.fn()} showAsset={false} />);
+
+    expect(screen.queryByRole('columnheader', { name: 'Asset' })).not.toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Worker' })).toBeInTheDocument();
+  });
+
+  it('puts the soonest window first, whatever order it was given them in', () => {
+    render(
+      <ReservationList
+        reservations={[
+          reservation({ _id: 'res-late', assetId: 'LATE-001', startAt: '2027-03-01T09:00:00.000Z', endAt: '2027-03-01T17:00:00.000Z' }),
+          reservation({ _id: 'res-soon', assetId: 'SOON-001', startAt: '2027-01-01T09:00:00.000Z', endAt: '2027-01-01T17:00:00.000Z' }),
+        ]}
+        onChanged={jest.fn()}
+      />,
+    );
+
+    const codes = screen.getAllByText(/-001$/).map((el) => el.textContent);
+    expect(codes).toEqual(['SOON-001', 'LATE-001']);
+  });
+
+  it('names the reservation being cancelled in the confirmation', () => {
+    render(<ReservationList reservations={[reservation()]} onChanged={jest.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel reservation' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent(/DRILL-001/);
+    expect(dialog).toHaveTextContent(/worker-1/);
+  });
+
+  it('closes the confirmation without cancelling when the keeper keeps the booking', () => {
+    render(<ReservationList reservations={[reservation()]} onChanged={jest.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel reservation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('still says so when there are no reservations at all', () => {
+    render(<ReservationList reservations={[]} onChanged={jest.fn()} emptyMessage="No reservations." />);
+    expect(screen.getByText('No reservations.')).toBeInTheDocument();
+  });
 });
