@@ -11,7 +11,8 @@ import { useToast } from './ToastProvider';
 /**
  * Cancelling is a soft transition on the server: the row stays, with status CANCELLED and
  * its reason, so the table keeps showing what was booked and then called off. Only ACTIVE
- * reservations can be cancelled — EXPIRED ones are already past, and the API refuses them.
+ * reservations can be cancelled — one whose window has passed reads as Not collected, and the API
+ * refuses to cancel it.
  */
 export function ReservationList({
   reservations,
