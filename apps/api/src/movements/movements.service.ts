@@ -1,6 +1,6 @@
 import { ConflictException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
-import { Connection, Model, Types } from 'mongoose';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { AssetStatus, CorrectMovementDto, IssueMovementDto, MovementType, ReservationStatus, ReturnMovementDto } from '@equipment-ledger/shared';
 import { Asset } from '../schemas/asset.schema';
 import { Worker } from '../schemas/worker.schema';
@@ -10,6 +10,7 @@ import { AssetLock } from '../schemas/asset-lock.schema';
 import { checkCertification } from '../domain/certification';
 import { withIdempotency, replayOrThrow } from '../domain/idempotency';
 import { withRetries } from '../domain/retry';
+import { resolveEffectiveMovements } from '../domain/replay';
 import { MovementResult, RawMovementDoc, toMovementResult } from './movement-result';
 
 @Injectable()
@@ -274,6 +275,10 @@ export class MovementsService {
         const original = await this.movementModel.findById(movementId, null, { session });
         if (!original) throw new NotFoundException(`Movement ${movementId} not found`);
 
+        if (dto.occurredAt) {
+          await this.assertCorrectionKeepsLedgerOrder(original, new Date(dto.occurredAt), session);
+        }
+
         // Claim the correction atomically: the filter requires correctedBy to still be
         // null at the moment of the write, so two concurrent corrections of the same
         // movement (different idempotencyKeys) can never both win — MongoDB serializes
@@ -320,6 +325,75 @@ export class MovementsService {
       });
     } finally {
       await session.endSession();
+    }
+  }
+
+  /**
+   * A correction may fix *when* something happened; it may not reorder the ledger.
+   *
+   * Live asset state (`assets.status`/`currentHolderId`) is a denormalisation of the
+   * movement sequence, and `check-invariants` proves the two agree. A correction that
+   * jumped a neighbouring movement would break that agreement without touching either
+   * document: move a return back before the issue it closes and a replay says the asset
+   * is still held while the asset document says it is in store. Nothing downstream can
+   * tell which is right.
+   *
+   * So the rule is: the new time must stay strictly inside the gap its movement already
+   * occupies — after the movement before it, before the movement after it. Keeping the
+   * order means the denormalised state stays correct by construction, with nothing to
+   * re-derive. The alternative (accept anything, then recompute current state) would let
+   * a keeper's typo silently un-return an asset that is physically back on the shelf.
+   *
+   * Strictly inside, not at the boundary: two movements sharing a timestamp would leave
+   * replay order decided by the ObjectId tiebreak, which is not something a keeper
+   * editing a time should be able to make load-bearing.
+   */
+  private async assertCorrectionKeepsLedgerOrder(
+    original: RawMovementDoc,
+    newOccurredAt: Date,
+    session: ClientSession,
+  ): Promise<void> {
+    if (newOccurredAt.getTime() > Date.now()) {
+      throw new UnprocessableEntityException(
+        `Cannot date this ${original.type} movement into the future (${newOccurredAt.toISOString()})`,
+      );
+    }
+
+    const siblings = await this.movementModel.find({ assetId: original.assetId }, null, { session }).lean();
+    const effective = resolveEffectiveMovements(
+      siblings.map((m) => ({
+        id: String(m._id),
+        assetId: m.assetId,
+        workerId: m.workerId,
+        type: m.type,
+        occurredAt: m.occurredAt,
+        recordedAt: m.recordedAt,
+        correctionOf: m.correctionOf ? String(m.correctionOf) : null,
+        correctedBy: m.correctedBy ? String(m.correctedBy) : null,
+      })),
+    ).filter((m) => m.id !== String(original._id));
+
+    const currentTime = original.occurredAt.getTime();
+    const previous = effective
+      .filter((m) => m.occurredAt.getTime() < currentTime)
+      .sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime())[0];
+    const next = effective
+      .filter((m) => m.occurredAt.getTime() > currentTime)
+      .sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime())[0];
+
+    if (previous && newOccurredAt.getTime() <= previous.occurredAt.getTime()) {
+      throw new UnprocessableEntityException(
+        `Cannot move this ${original.type} to ${newOccurredAt.toISOString()}: it would land at or before the ` +
+          `${previous.type} at ${previous.occurredAt.toISOString()} that precedes it. Corrections may change a ` +
+          `movement's time, but not its place in the asset's history.`,
+      );
+    }
+    if (next && newOccurredAt.getTime() >= next.occurredAt.getTime()) {
+      throw new UnprocessableEntityException(
+        `Cannot move this ${original.type} to ${newOccurredAt.toISOString()}: it would land at or after the ` +
+          `${next.type} at ${next.occurredAt.toISOString()} that follows it. Corrections may change a ` +
+          `movement's time, but not its place in the asset's history.`,
+      );
     }
   }
 }
