@@ -12,6 +12,7 @@ The store keeper's problem is small to describe and easy to get wrong: an asset 
 
 - **Issue and return** assets to workers, with the "one holder, ever" rule enforced by the database itself rather than by application-level checking.
 - **Certification gating** — an asset can require a certification, and issuing to a worker whose certification is missing or expired is refused. Certifications can be added, renewed, and removed per worker.
+- **Due-back times** — an issue can name when the asset is expected back. Anything still out past its time reads as overdue, on the dashboard and at any past instant.
 - **Reservations** — book an asset for a future window. Overlapping windows on the same asset are impossible, including under simultaneous requests. Reservations are cancelled, never deleted, so a called-off booking is still part of the record.
 - **Out of service** — take an asset out of circulation (with a reason) and bring it back; both are ledger movements like any other.
 - **Corrections** — fix a wrongly logged time or detail by appending a correction that references the original. The original is never mutated.
@@ -22,7 +23,7 @@ The store keeper's problem is small to describe and easy to get wrong: an asset 
 
 | Route | What it's for |
 | --- | --- |
-| `/` | Dashboard — every asset, its status, holder, upcoming reservation and last activity, with issue/return/out-of-service actions |
+| `/` | Dashboard — every asset, its status, holder, due-back time, upcoming reservation and last activity, with issue/return/out-of-service actions and an overdue-only filter |
 | `/assets/:id` | One asset: current state, required certification, its reservations, and its full movement history |
 | `/workers` | All workers, paginated |
 | `/workers/:id` | One worker: certifications (editable), what they're holding, their reservations |
@@ -119,6 +120,8 @@ npm run seed
 
 Deterministic and repeat-safe: it always drops and rebuilds the collections it owns, so running it twice never doubles the store, and the same command always produces the same story (which asset is out of service, which worker has an expired certification, which movement was corrected, and so on) — only the absolute timestamps shift to stay anchored around "now," so the seeded data, and the overdue and outstanding items in it, always looks current whenever you run it.
 
+The seeded store includes one asset deliberately out past its due-back time, alongside ordinary outstanding issues whose due times have not arrived yet, so the difference between "on loan" and "out too long" is visible on the dashboard without waiting for anything.
+
 ## Testing
 
 ```bash
@@ -135,7 +138,7 @@ Always invoked with `--runInBand`: several test files share that one in-memory i
 npm run check-invariants
 ```
 
-Independently replays the entire movement ledger and checks it against the live, denormalized asset state — "read the ledger straight out of Mongo and check it says the same thing the screens do," runnable any time, not just right after seeding. It also checks for double-open movements, overlapping active reservations, and correction-chain integrity. Exits non-zero and prints every violation it finds.
+Independently replays the entire movement ledger and checks it against the live, denormalized asset state — "read the ledger straight out of Mongo and check it says the same thing the screens do," runnable any time, not just right after seeding. It also checks for double-open movements, overlapping active reservations, correction-chain integrity, and that a due-back time only ever sits on an issue. Exits non-zero and prints every violation it finds.
 
 ---
 
@@ -171,9 +174,9 @@ packages/
 | `GET` | `/assets/:id/history` | That asset's movements, with corrections attached |
 | `POST` | `/assets/:id/out-of-service` | Take out of service (optional reason) |
 | `POST` | `/assets/:id/back-in-service` | Return to circulation |
-| `POST` | `/movements/issue` | Issue to a worker |
+| `POST` | `/movements/issue` | Issue to a worker (optional `dueAt`; defaults to the reservation window when collecting against one) |
 | `POST` | `/movements/return` | Return (optionally straight to out-of-service) |
-| `POST` | `/movements/:id/correct` | Append a correction to a movement |
+| `POST` | `/movements/:id/correct` | Append a correction to a movement (`occurredAt`, `dueAt` and/or `reason`) |
 | `GET` | `/reservations` | All reservations |
 | `POST` | `/reservations` | Book a window |
 | `POST` | `/reservations/:id/cancel` | Cancel a booking (optional reason) |
@@ -201,9 +204,10 @@ Every mutating request takes a client-generated `idempotencyKey`. Request and re
 
 - **Movements are the ledger.** The `movements` collection is an append-only log of things that actually happened (`ISSUE`, `RETURN`, `OUT_OF_SERVICE`, `BACK_IN_SERVICE`). Every movement carries both `occurredAt` (business time — when it happened, which a keeper can backdate) and `recordedAt` (system time — when it was written, never edited). Rejected requests (a refused issue, an out-of-service asset) are never written here — only things that actually happened go in the ledger.
 - **Assets carry denormalized current state** (`status`, `currentHolderId`) purely for fast "who holds what right now" reads. It is never the source of truth — the invariant checker's whole job is proving it always agrees with what replaying the ledger produces.
-- **Corrections are new records, not edits.** Fixing a wrongly logged time inserts a new movement referencing the original (`correctionOf`/`correctedBy`); the original is never mutated, so the history always shows that a mistake was made and fixed, not a rewritten past.
+- **Corrections are new records, not edits.** Fixing a wrongly logged time inserts a new movement referencing the original (`correctionOf`/`correctedBy`); the original is never mutated, so the history always shows that a mistake was made and fixed, not a rewritten past. A correction may change *when* a movement happened, but not its place in the sequence: the new time has to stay strictly between the movements either side of it, and can never be in the future. Without that rule a return backdated before the issue it closes would leave a replay saying the asset is still held while the asset document says it is in store — both derived from the same ledger, disagreeing. Keeping the order means the denormalised state stays correct by construction, and the refusal names the movement it collided with.
 - **"As of" reconstruction** replays the ledger (substituting corrected values where a correction exists) up to any instant and derives the store's state at that moment — the same replay function backs both the historical `/store?asOf=` endpoint and the invariant checker, so there is exactly one implementation of "what does the ledger say happened" in the whole system.
 - **Cancelling a reservation is a status change, not a delete.** `POST /reservations/:id/cancel` sets `status: CANCELLED` and stores the reason; the row stays, so "what was booked and then called off" is still answerable. The window frees itself as a side effect, because overlap detection only ever considers `ACTIVE` reservations. The write is a compare-and-set on the single reservation document (`status: ACTIVE` in the filter), so two simultaneous cancels can't both win — no transaction needed.
+- **Overdue is derived, not stored, and not a status.** An `ISSUE` movement can carry an optional `dueAt`; an asset is overdue when it is out on an issue whose `dueAt` has passed. Deliberately *not* a fourth `AssetStatus` value: "one holder, ever" is enforced by compare-and-swapping `assets.status` between `IN_STORE` and `ISSUED` (see below), and a status an asset could drift into on its own — with no writer, just the clock — would stop a return from matching that filter and quietly break the invariant. Optional, too: a keeper who does not know when something is coming back should not have to invent a time, and an asset issued without one simply never reads as overdue. The replay carries `dueAt`, so `GET /store?asOf=` reports overdue *as of that instant* rather than as of now.
 - **Certifications are worker attributes, not ledger events.** Adding, renewing (`PUT /workers/:id/certifications/:code`) or removing (`DELETE`) one writes no movement, and none of it is retroactive: a past `ISSUE` stands as the record of what happened and a worker keeps any asset already in hand — only the *next* issue sees the change. Codes are unique per worker (the add is guarded by a `certifications.code: { $ne: code }` filter, so concurrent adds can't duplicate one), which keeps the certification check's lookup-by-code unambiguous.
 - We used **Mongoose** (code-first schema classes, the same spirit as EF Core entity classes) with **migrate-mongo** for index/replica-set migrations, rather than Prisma — Prisma's MongoDB connector doesn't expose the raw `findOneAndUpdate`-with-filter and manual transaction-session control the concurrency mechanics below need.
 
@@ -232,11 +236,11 @@ MongoDB guarantees single-document updates are atomic. Under two simultaneous is
 - **No bitemporal "what did we believe at time T" queries** — only business-time ("what was actually true at time T") reconstruction, which is what the brief asks for. A system-time axis (tracking what the ledger *looked like* to a past query, before later corrections) would need every read to also pin a `recordedAt` cutoff, not just `occurredAt`.
 - **Reservation `EXPIRED` status is computed lazily on read**, not by a background job — there's nothing in this system that needs to fire on a schedule at this scale.
 - **No auth, roles, or permissions** — per the brief's own scope discipline. The keeper/worker "pick a name from a list" flow is cosmetic identification, not access control.
-- **Movement DTOs don't reject a future-dated `occurredAt`.** `IssueMovementDto`/`ReturnMovementDto`/etc. only validate that `occurredAt` is a well-formed timestamp, not that it's in the past — so a movement backdated into the future is technically reachable via the API (though not from any current UI or seed data), and in a contrived case could cause `check-invariants`' `replay-matches-live-state` check to report a mismatch, since it always replays "as of now." Known gap, not fixed in this pass.
+- **Issue and return still accept a future-dated `occurredAt`.** `IssueMovementDto`/`ReturnMovementDto` validate that `occurredAt` is a well-formed timestamp, not that it is in the past, so a movement dated into the future is reachable via the API (though not from any current UI or seed data) and could in a contrived case make `check-invariants`' `replay-matches-live-state` report a mismatch, since it always replays "as of now". Corrections *are* now guarded — they refuse a future time and refuse to cross a neighbouring movement — but the same guard has not been pushed back onto the original write paths. Known gap.
 
 ## What I'd do with another day
 
 1. **Reversal movements** — a proper "this issue should never have happened" undo, distinct from a timing correction, with its own effect on current state.
 2. **A materialized snapshot for `/store?asOf=`** if the ledger grew past the point where an in-memory replay over an indexed query stays single-digit milliseconds — not needed at this seed's scale, but the first thing I'd profile before it became one.
 3. **Real auth and a keeper entity** — right now "who's on the hatch" is a cosmetic, unauthenticated label; a real deployment needs it to be an actual identity.
-4. **A small reservation-to-issue handoff UI** — right now issuing against a reservation works via the API (`reservationId` on the issue request), but the dashboard doesn't yet surface "issue this asset against its upcoming reservation" as a one-click action from the reservations list.
+4. **A small reservation-to-issue handoff UI** — issuing against a reservation works via the API (`reservationId` on the issue request, which also supplies the due-back time), but the dashboard doesn't yet surface "issue this asset against its upcoming reservation" as a one-click action from the reservations list.
