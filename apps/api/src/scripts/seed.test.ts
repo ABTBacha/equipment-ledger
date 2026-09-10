@@ -66,6 +66,31 @@ describe('seed', () => {
     expect(activeReservations).toBeGreaterThanOrEqual(2);
   });
 
+  it('spreads movements across the whole window, not just its opening days', async () => {
+    const fixedNow = new Date('2026-09-08T12:00:00Z');
+    await seed(process.env.MONGO_URI!, fixedNow);
+
+    const DAY = 24 * 60 * 60 * 1000;
+    const movements = await MovementModel.find({}).lean();
+    const daysWithTraffic = new Set(
+      movements.map((m) => Math.floor((fixedNow.getTime() - m.occurredAt.getTime()) / DAY)),
+    );
+
+    // A thirty-day window that only has traffic in its first week reads as a dead store.
+    expect(daysWithTraffic.size).toBeGreaterThanOrEqual(24);
+  });
+
+  it('seeds a certification that is still valid but expires inside the window', async () => {
+    const fixedNow = new Date('2026-09-08T12:00:00Z');
+    await seed(process.env.MONGO_URI!, fixedNow);
+
+    const windowEnd = new Date(fixedNow.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const expiringSoon = await WorkerModel.countDocuments({
+      certifications: { $elemMatch: { expiresAt: { $gt: fixedNow, $lt: windowEnd } } },
+    });
+    expect(expiringSoon).toBeGreaterThanOrEqual(1);
+  });
+
   it('passes the invariant checker immediately after seeding', async () => {
     const fixedNow = new Date('2026-09-08T12:00:00Z');
     await seed(process.env.MONGO_URI!, fixedNow);

@@ -52,12 +52,17 @@ function buildAssets() {
 function buildWorkers(now: Date) {
   const longExpired = new Date(now.getTime() - 60 * DAY_MS);
   const expiredInWindow = new Date(now.getTime() - 15 * DAY_MS);
+  // Still valid today, lapses inside the window: the one certification a keeper can act on
+  // before it becomes a refusal. Sits after the future booking this worker holds (+5 days),
+  // so they are still certified at the moment they collect.
+  const expiringSoon = new Date(now.getTime() + 10 * DAY_MS);
   const farFuture = new Date(now.getTime() + 365 * DAY_MS);
 
   return WORKER_NAMES.map((name, i) => {
     let certifications: { code: string; expiresAt: Date }[];
     if (i === 0) certifications = [{ code: 'GAS-DETECT', expiresAt: longExpired }];
     else if (i === 1) certifications = [{ code: 'HEIGHTS', expiresAt: expiredInWindow }];
+    else if (i === 2) certifications = [{ code: 'HEIGHTS', expiresAt: expiringSoon }];
     else if (i % 2 === 0) certifications = [{ code: 'HEIGHTS', expiresAt: farFuture }];
     else certifications = [{ code: 'GAS-DETECT', expiresAt: farFuture }];
     return { _id: slugify(name), name, certifications };
@@ -252,13 +257,17 @@ function buildMovementsAndPatches(
     }
 
     // Ordinary traffic: 1-3 issue/return pairs across the window; ~15% of assets end up still outstanding.
+    // Each pair gets its own slot of the window and lands somewhere inside it, so the thirty days
+    // read as thirty days of work rather than a busy first week followed by silence. A loan runs at
+    // most 8 hours, well short of the shortest slot, so slots never bleed into one another and the
+    // pairs stay in order.
     const pairCount = 1 + Math.floor(rng() * 3);
-    let cursor = windowStart;
+    const slotMs = (WINDOW_DAYS * DAY_MS) / pairCount;
     const leaveOutstanding = rng() < 0.15;
     let settled = false;
 
     for (let p = 0; p < pairCount && !settled; p++) {
-      const issueOccurredAt = new Date(cursor.getTime() + rng() * 2 * DAY_MS);
+      const issueOccurredAt = new Date(windowStart.getTime() + (p + rng() * 0.8) * slotMs);
       if (issueOccurredAt.getTime() >= now.getTime()) break;
 
       const worker = pickWorker(asset.requiresCertification);
@@ -307,7 +316,6 @@ function buildMovementsAndPatches(
         reason: null,
       });
       patches.set(asset._id, { status: 'IN_STORE', currentHolderId: null, currentMovementId: null });
-      cursor = returnOccurredAt;
     }
   }
 
