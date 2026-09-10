@@ -7,6 +7,8 @@ export interface MovementView {
   type: MovementType;
   occurredAt: string;
   recordedAt: string;
+  /** Only ever set on an ISSUE: when the asset was due back. */
+  dueAt: string | null;
   reason: string | null;
 }
 

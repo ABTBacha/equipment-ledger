@@ -23,6 +23,8 @@ function asset(overrides: Partial<AssetSummary> = {}): AssetSummary {
     currentHolderId: null,
     upcomingReservation: null,
     lastActivityAt: null,
+    dueAt: null,
+    isOverdue: false,
     ...overrides,
   };
 }
@@ -104,5 +106,23 @@ describe('AssetDetailClient', () => {
     const lastActivityAt = '2026-09-01T09:00:00.000Z';
     render(<AssetDetailClient asset={asset({ lastActivityAt })} history={HISTORY} reservations={[]} />);
     expect(screen.getByText(new Date(lastActivityAt).toLocaleString())).toBeInTheDocument();
+  });
+
+  it('says when an issued asset is due back, and that it is late once it is', () => {
+    render(
+      <AssetDetailClient
+        asset={asset({
+          status: 'ISSUED',
+          currentHolderId: 'worker-1',
+          dueAt: '2026-08-01T17:00:00.000Z',
+          isOverdue: true,
+        })}
+        history={[]}
+        reservations={[]}
+      />,
+    );
+
+    expect(screen.getByText(new Date('2026-08-01T17:00:00.000Z').toLocaleString())).toBeInTheDocument();
+    expect(screen.getByText('Overdue')).toBeInTheDocument();
   });
 });

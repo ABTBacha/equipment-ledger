@@ -33,4 +33,29 @@ describe('HistoryTimeline', () => {
     expect(screen.getByText('Correct this entry')).toBeInTheDocument();
     expect(screen.queryByText('Corrected')).not.toBeInTheDocument();
   });
+
+  it('shows the due-back time an issue recorded', () => {
+    render(
+      <HistoryTimeline
+        entries={[
+          {
+            movement: {
+              _id: 'm1',
+              assetId: 'DRILL-001',
+              workerId: 'worker-1',
+              type: 'ISSUE',
+              occurredAt: '2026-08-01T09:00:00.000Z',
+              recordedAt: '2026-08-01T09:00:00.000Z',
+              dueAt: '2026-08-01T17:00:00.000Z',
+              reason: null,
+            },
+            correction: null,
+          },
+        ]}
+        onCorrected={() => {}}
+      />,
+    );
+
+    expect(screen.getByText(/due back/i)).toBeInTheDocument();
+  });
 });

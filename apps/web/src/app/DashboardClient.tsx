@@ -14,6 +14,7 @@ export function DashboardClient({ assets }: { assets: AssetSummary[] }) {
   const router = useRouter();
   const [kindFilter, setKindFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [overdueOnly, setOverdueOnly] = useState(false);
   const [search, setSearch] = useState('');
   const [modal, setModal] = useState<{ asset: AssetSummary; action: 'issue' | 'return' } | null>(null);
 
@@ -24,10 +25,11 @@ export function DashboardClient({ assets }: { assets: AssetSummary[] }) {
       assets.filter((a) => {
         if (kindFilter && a.kind !== kindFilter) return false;
         if (statusFilter && a.status !== statusFilter) return false;
+        if (overdueOnly && !a.isOverdue) return false;
         if (search && !a._id.toLowerCase().includes(search.toLowerCase())) return false;
         return true;
       }),
-    [assets, kindFilter, statusFilter, search],
+    [assets, kindFilter, statusFilter, overdueOnly, search],
   );
 
   const closeModal = () => {
@@ -48,6 +50,19 @@ export function DashboardClient({ assets }: { assets: AssetSummary[] }) {
     { key: 'kind', header: 'Kind', render: (a) => a.kind },
     { key: 'status', header: 'Status', render: (a) => <StatusIndicator status={a.status} /> },
     { key: 'holder', header: 'Holder', render: (a) => a.currentHolderId ?? '—' },
+    {
+      key: 'due',
+      header: 'Due back',
+      render: (a) =>
+        a.dueAt ? (
+          <span className={a.isOverdue ? 'font-mono text-accent-red' : 'font-mono text-muted'}>
+            {formatDateTime(a.dueAt)}
+            {a.isOverdue && <span className="ml-2 not-italic">Overdue</span>}
+          </span>
+        ) : (
+          '—'
+        ),
+    },
     { key: 'cert', header: 'Cert required', render: (a) => a.requiresCertification ?? '—' },
     {
       key: 'reservation',
@@ -98,6 +113,16 @@ export function DashboardClient({ assets }: { assets: AssetSummary[] }) {
           <option value="ISSUED">Issued</option>
           <option value="OUT_OF_SERVICE">Out of service</option>
         </select>
+        {/* Overdue is not a status — an overdue asset is ISSUED — so it filters separately. */}
+        <label className="flex items-center gap-2 text-sm text-muted">
+          <input
+            type="checkbox"
+            checked={overdueOnly}
+            onChange={(e) => setOverdueOnly(e.target.checked)}
+            aria-label="Overdue only"
+          />
+          Overdue only
+        </label>
       </div>
       <DataTable
         columns={columns}

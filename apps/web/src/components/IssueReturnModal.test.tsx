@@ -118,3 +118,57 @@ describe('IssueReturnModal toast on success', () => {
     expect(await screen.findByText('Issued to worker-9')).toBeInTheDocument();
   });
 });
+
+describe('IssueReturnModal due-back time', () => {
+  it('sends the due-back time the keeper picked, as an instant', async () => {
+    const { queueSubmitResolve } = mockApiFetch();
+    queueSubmitResolve();
+
+    render(
+      <ToastProvider>
+        <IssueReturnModal asset={asset} action="issue" onClose={() => {}} />
+      </ToastProvider>,
+    );
+    await selectWorker('Worker One (worker-1)');
+
+    fireEvent.change(screen.getByLabelText(/due back/i), { target: { value: '2026-09-11T17:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    await waitFor(() => {
+      const submit = (apiFetch as jest.Mock).mock.calls.find(([path]) => path === '/movements/issue');
+      expect(submit).toBeDefined();
+      const body = JSON.parse(submit![1].body);
+      expect(body.dueAt).toBe(new Date('2026-09-11T17:00').toISOString());
+    });
+  });
+
+  it('omits dueAt entirely when the keeper leaves it blank', async () => {
+    const { queueSubmitResolve } = mockApiFetch();
+    queueSubmitResolve();
+
+    render(
+      <ToastProvider>
+        <IssueReturnModal asset={asset} action="issue" onClose={() => {}} />
+      </ToastProvider>,
+    );
+    await selectWorker('Worker One (worker-1)');
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    await waitFor(() => {
+      const submit = (apiFetch as jest.Mock).mock.calls.find(([path]) => path === '/movements/issue');
+      expect(submit).toBeDefined();
+      expect(JSON.parse(submit![1].body).dueAt).toBeUndefined();
+    });
+  });
+
+  it('does not offer a due-back field when taking an asset back', async () => {
+    mockApiFetch();
+    render(
+      <ToastProvider>
+        <IssueReturnModal asset={asset} action="return" onClose={() => {}} />
+      </ToastProvider>,
+    );
+
+    expect(screen.queryByLabelText(/due back/i)).not.toBeInTheDocument();
+  });
+});

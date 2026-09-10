@@ -77,4 +77,30 @@ describe('HistoryClient', () => {
     expect(await screen.findByText('network down')).toBeInTheDocument();
     expect(screen.queryByText('No rows to show.')).toBeInTheDocument();
   });
+
+  it('reports overdue as of the instant asked about, from the store snapshot', async () => {
+    (apiFetch as jest.Mock).mockImplementation((path: string) => {
+      if (path === '/assets') {
+        return Promise.resolve([{ _id: 'DRILL-001', kind: 'drill', requiresCertification: null }]);
+      }
+      return Promise.resolve({
+        asOf: new Date().toISOString(),
+        assets: {
+          'DRILL-001': {
+            status: 'ISSUED',
+            holderId: 'worker-1',
+            dueAt: '2026-08-01T12:00:00.000Z',
+            isOverdue: true,
+          },
+        },
+      });
+    });
+
+    render(<HistoryClient />);
+
+    await waitFor(() => {
+      expect(screen.getByText(new Date('2026-08-01T12:00:00.000Z').toLocaleString())).toBeInTheDocument();
+    });
+    expect(screen.getByText('Overdue')).toBeInTheDocument();
+  });
 });

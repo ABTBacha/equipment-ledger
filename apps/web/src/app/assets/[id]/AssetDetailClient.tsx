@@ -45,6 +45,14 @@ export function AssetDetailClient({
 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 border border-hairline bg-surface p-4 mb-6">
         <Field label="Held by">{asset.currentHolderId ?? 'In store'}</Field>
+        {asset.dueAt && (
+          <Field label="Due back">
+            <span className={asset.isOverdue ? 'font-mono text-sm text-accent-red' : 'font-mono text-sm'}>
+              {formatDateTime(asset.dueAt)}
+              {asset.isOverdue && <span className="ml-2">Overdue</span>}
+            </span>
+          </Field>
+        )}
         <Field label="Certification">{asset.requiresCertification ?? 'None required'}</Field>
         <Field label="Last activity">
           <span className="font-mono text-sm">{formatDateTime(asset.lastActivityAt)}</span>

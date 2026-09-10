@@ -21,6 +21,7 @@ export function IssueReturnModal({
   const [workerId, setWorkerId] = useState('');
   const [workerOptions, setWorkerOptions] = useState<SearchableSelectOption[]>([]);
   const [occurredAt, setOccurredAt] = useState('');
+  const [dueAt, setDueAt] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,6 +52,10 @@ export function IssueReturnModal({
           workerId,
           idempotencyKey,
           occurredAt: occurredAt ? new Date(occurredAt).toISOString() : undefined,
+          // Only ever sent on an issue, and only when the keeper named a time: an asset
+          // issued without one never reads as overdue, which is the honest answer when
+          // nobody said when it was coming back.
+          dueAt: action === 'issue' && dueAt ? new Date(dueAt).toISOString() : undefined,
           loggedBy: getCurrentKeeper() ?? undefined,
         }),
       });
@@ -87,6 +92,21 @@ export function IssueReturnModal({
           className="border border-hairline bg-surface px-3 py-2 w-full mb-3 text-primary"
           disabled={submitting}
         />
+        {action === 'issue' && (
+          <>
+            <label className="block text-sm mb-1 text-muted" htmlFor="due-at">
+              Due back (optional)
+            </label>
+            <input
+              id="due-at"
+              type="datetime-local"
+              value={dueAt}
+              onChange={(e) => setDueAt(e.target.value)}
+              className="border border-hairline bg-surface px-3 py-2 w-full mb-3 text-primary"
+              disabled={submitting}
+            />
+          </>
+        )}
         {error && <div className="text-sm text-accent-red mb-3">{error}</div>}
         <div className="flex justify-end gap-2">
           <button

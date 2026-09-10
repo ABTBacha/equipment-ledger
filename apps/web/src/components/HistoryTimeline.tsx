@@ -17,6 +17,11 @@ export function HistoryTimeline({ entries, onCorrected }: { entries: HistoryEntr
               <div className="text-sm text-muted font-mono">
                 occurred {new Date(entry.movement.occurredAt).toLocaleString()}
               </div>
+              {entry.movement.dueAt && (
+                <div className="text-sm text-muted font-mono">
+                  due back {new Date(entry.movement.dueAt).toLocaleString()}
+                </div>
+              )}
             </div>
             {!entry.correction && (
               <button
@@ -34,12 +39,20 @@ export function HistoryTimeline({ entries, onCorrected }: { entries: HistoryEntr
               <div className="text-primary font-mono">
                 now recorded as occurring {new Date(entry.correction.occurredAt).toLocaleString()}
               </div>
+              {entry.correction.dueAt !== entry.movement.dueAt && (
+                <div className="text-primary font-mono">
+                  {entry.correction.dueAt
+                    ? `due back now recorded as ${new Date(entry.correction.dueAt).toLocaleString()}`
+                    : 'due-back time removed'}
+                </div>
+              )}
               {entry.correction.reason && <div className="text-muted">{entry.correction.reason}</div>}
             </div>
           )}
           {correctingId === entry.movement._id && (
             <CorrectMovementForm
               movementId={entry.movement._id}
+              canCorrectDueAt={entry.movement.type === 'ISSUE'}
               onDone={() => {
                 setCorrectingId(null);
                 onCorrected();

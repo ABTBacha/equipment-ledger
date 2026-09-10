@@ -22,6 +22,8 @@ function asset(overrides: Partial<AssetSummary> = {}): AssetSummary {
     currentHolderId: null,
     upcomingReservation: null,
     lastActivityAt: null,
+    dueAt: null,
+    isOverdue: false,
     ...overrides,
   };
 }
@@ -56,5 +58,50 @@ describe('DashboardClient', () => {
 
     expect(screen.queryByRole('link', { name: 'DRILL-001' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'SAW-002' })).toBeInTheDocument();
+  });
+});
+
+describe('DashboardClient overdue', () => {
+  it('shows when an issued asset is due back', () => {
+    render(
+      <DashboardClient
+        assets={[asset({ status: 'ISSUED', currentHolderId: 'worker-1', dueAt: '2026-09-11T17:00:00.000Z' })]}
+      />,
+    );
+    expect(screen.getByText(new Date('2026-09-11T17:00:00.000Z').toLocaleString())).toBeInTheDocument();
+  });
+
+  it('flags an overdue asset', () => {
+    render(
+      <DashboardClient
+        assets={[asset({ status: 'ISSUED', currentHolderId: 'worker-1', dueAt: '2026-09-01T17:00:00.000Z', isOverdue: true })]}
+      />,
+    );
+    expect(screen.getByText('Overdue')).toBeInTheDocument();
+  });
+
+  it('does not flag an asset that is out but not yet due', () => {
+    render(
+      <DashboardClient
+        assets={[asset({ status: 'ISSUED', currentHolderId: 'worker-1', dueAt: '2026-12-01T17:00:00.000Z' })]}
+      />,
+    );
+    expect(screen.queryByText('Overdue')).not.toBeInTheDocument();
+  });
+
+  it('narrows the table to overdue assets on request', () => {
+    render(
+      <DashboardClient
+        assets={[
+          asset({ _id: 'DRILL-001', status: 'ISSUED', currentHolderId: 'worker-1', isOverdue: true }),
+          asset({ _id: 'DRILL-002', status: 'IN_STORE' }),
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText(/overdue only/i));
+
+    expect(screen.getByRole('link', { name: 'DRILL-001' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'DRILL-002' })).not.toBeInTheDocument();
   });
 });

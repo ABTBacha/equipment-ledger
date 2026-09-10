@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { StatusIndicator } from './StatusIndicator';
+import { formatDateTime } from '../lib/format';
 
 export interface AssetSummary {
   _id: string;
@@ -9,6 +10,9 @@ export interface AssetSummary {
   currentHolderId: string | null;
   upcomingReservation: { startAt: string; endAt: string; workerId: string } | null;
   lastActivityAt: string | null;
+  /** When the current holder is due to bring it back; null unless it is out on an issue that named a time. */
+  dueAt: string | null;
+  isOverdue: boolean;
 }
 
 export function StoreGrid({
@@ -32,6 +36,11 @@ export function StoreGrid({
             <StatusIndicator status={asset.status} />
           </div>
           {asset.currentHolderId && <div className="text-sm text-muted mt-2">Held by {asset.currentHolderId}</div>}
+          {asset.dueAt && (
+            <div className={`text-sm mt-1 ${asset.isOverdue ? 'text-accent-red' : 'text-muted'}`}>
+              {asset.isOverdue ? 'Overdue since' : 'Due back'} {formatDateTime(asset.dueAt)}
+            </div>
+          )}
           {(onIssue || onReturn) && (
             <div className="mt-3 flex gap-2">
               {onIssue && asset.status === 'IN_STORE' && (

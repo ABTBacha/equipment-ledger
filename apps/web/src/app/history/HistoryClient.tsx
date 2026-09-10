@@ -8,7 +8,15 @@ import { StatusIndicator } from '../../components/StatusIndicator';
 
 interface StoreResponse {
   asOf: string;
-  assets: Record<string, { status: 'IN_STORE' | 'ISSUED' | 'OUT_OF_SERVICE'; holderId: string | null }>;
+  assets: Record<
+    string,
+    {
+      status: 'IN_STORE' | 'ISSUED' | 'OUT_OF_SERVICE';
+      holderId: string | null;
+      dueAt: string | null;
+      isOverdue: boolean;
+    }
+  >;
 }
 
 function formatDateTime(iso: string | null): string {
@@ -44,6 +52,11 @@ export function HistoryClient() {
             ...m,
             status: state?.status ?? 'IN_STORE',
             currentHolderId: state?.holderId ?? null,
+            // Unlike the two fields below, these ARE historical: the replay carries the
+            // due-back time of the issue that was open at that instant, and the API compares
+            // it against that same instant rather than against now.
+            dueAt: state?.dueAt ?? null,
+            isOverdue: state?.isOverdue ?? false,
             // Historical reconstruction only covers status/holder (from /store?asOf=).
             // upcomingReservation and lastActivityAt are always the CURRENT values on the
             // /assets response, so they must never be shown on a past "as of" snapshot.
@@ -80,6 +93,19 @@ export function HistoryClient() {
     { key: 'kind', header: 'Kind', render: (a) => a.kind },
     { key: 'status', header: 'Status', render: (a) => <StatusIndicator status={a.status} /> },
     { key: 'holder', header: 'Holder', render: (a) => a.currentHolderId ?? '—' },
+    {
+      key: 'due',
+      header: 'Due back',
+      render: (a) =>
+        a.dueAt ? (
+          <span className={a.isOverdue ? 'font-mono text-accent-red' : 'font-mono text-muted'}>
+            {formatDateTime(a.dueAt)}
+            {a.isOverdue && <span className="ml-2">Overdue</span>}
+          </span>
+        ) : (
+          '—'
+        ),
+    },
     { key: 'cert', header: 'Cert required', render: (a) => a.requiresCertification ?? '—' },
     {
       key: 'reservation',
