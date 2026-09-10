@@ -1,13 +1,22 @@
 import { ConflictException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
-import { AssetStatus, CorrectMovementDto, IssueMovementDto, MovementType, ReservationStatus, ReturnMovementDto } from '@equipment-ledger/shared';
+import {
+  AssetStatus,
+  CorrectMovementDto,
+  IssueMovementDto,
+  MIN_LOAN_BEFORE_RESERVATION_MS,
+  MovementType,
+  ReservationStatus,
+  ReturnMovementDto,
+} from '@equipment-ledger/shared';
 import { Asset } from '../schemas/asset.schema';
 import { Worker } from '../schemas/worker.schema';
 import { Movement } from '../schemas/movement.schema';
 import { Reservation } from '../schemas/reservation.schema';
 import { AssetLock } from '../schemas/asset-lock.schema';
 import { checkCertification } from '../domain/certification';
+import { intervalsOverlap } from '../domain/intervals';
 import { withIdempotency, replayOrThrow } from '../domain/idempotency';
 import { withRetries } from '../domain/retry';
 import { resolveEffectiveMovements, toRawMovement } from '../domain/replay';
@@ -40,26 +49,106 @@ export class MovementsService {
     // A due-back time at or before the moment of issue promises nothing a keeper could
     // act on, and would read as instantly overdue. Checked here, before the transaction,
     // because it depends only on the request.
-    if (dto.dueAt) {
-      const requestedDueAt = new Date(dto.dueAt);
-      if (requestedDueAt.getTime() <= occurredAt.getTime()) {
-        throw new UnprocessableEntityException(
-          `Due back ${requestedDueAt.toISOString()} is not after the issue at ${occurredAt.toISOString()}`,
-        );
-      }
+    const dueAt = new Date(dto.dueAt);
+    if (dueAt.getTime() <= occurredAt.getTime()) {
+      throw new UnprocessableEntityException(
+        `Due back ${dueAt.toISOString()} is not after the issue at ${occurredAt.toISOString()}`,
+      );
     }
 
     const { result } = await withIdempotency(this.movementModel, dto.idempotencyKey, () =>
-      withRetries(() => this.executeIssue(dto, occurredAt)),
+      withRetries(() => this.executeIssue(dto, occurredAt, dueAt)),
     );
     return toMovementResult(result);
   }
 
-  private async executeIssue(dto: IssueMovementDto, occurredAt: Date): Promise<RawMovementDoc> {
+  private async executeIssue(dto: IssueMovementDto, occurredAt: Date, dueAt: Date): Promise<RawMovementDoc> {
     const session = await this.connection.startSession();
     try {
       return await session.withTransaction(async () => {
         const movementId = new Types.ObjectId();
+
+        // Issuing now depends on reservations, and reserving depends on open issues, so the
+        // two need something in common to conflict on. reserve() already bumps this document;
+        // without issue() bumping it too, an issue could read reservations it has no write
+        // overlap with and a reservation could land in the window that issue just claimed.
+        // The CAS below is still what makes double-issue impossible — this is only what makes
+        // the cross-entity checks serialisable.
+        await this.assetLockModel.findOneAndUpdate(
+          { _id: dto.assetId },
+          { $inc: { nonce: 1 } },
+          { session, upsert: true, new: true },
+        );
+
+        const activeReservations = await this.reservationModel
+          .find({ assetId: dto.assetId, status: ReservationStatus.ACTIVE }, null, { session })
+          .lean();
+
+        const overlapping = activeReservations.filter((r) => intervalsOverlap(occurredAt, dueAt, r.startAt, r.endAt));
+        const someoneElses = overlapping.find((r) => r.workerId !== dto.workerId);
+        if (someoneElses) {
+          return replayOrThrow(
+            this.movementModel,
+            dto.idempotencyKey,
+            () =>
+              new ConflictException({
+                statusCode: 409,
+                error: 'Conflict',
+                code: 'RESERVED_FOR_ANOTHER_WORKER',
+                message:
+                  `Asset ${dto.assetId} is reserved for ${someoneElses.workerId} from ` +
+                  `${someoneElses.startAt.toISOString()} to ${someoneElses.endAt.toISOString()}`,
+                conflict: {
+                  workerId: someoneElses.workerId,
+                  startAt: someoneElses.startAt.toISOString(),
+                  endAt: someoneElses.endAt.toISOString(),
+                },
+              }),
+          );
+        }
+
+        // The reserving worker's own overlapping booking is not an obstacle — it is what they
+        // came for. Collecting it pins the due-back time to the window: the booking already
+        // states when the asset is free again, and a shorter loan would let this issue read as
+        // returned on time while the window it belongs to is still open.
+        const collectableReservation = overlapping.find((r) => r.workerId === dto.workerId) ?? null;
+        if (collectableReservation) {
+          if (dueAt.getTime() !== collectableReservation.endAt.getTime()) {
+            throw new UnprocessableEntityException(
+              `This issue collects a reservation ending ${collectableReservation.endAt.toISOString()}, ` +
+                `so it is due back then, not ${dueAt.toISOString()}`,
+            );
+          }
+        } else {
+          // Nothing being collected, so this loan has to fit in the gap before the next
+          // booking somebody else holds.
+          const nextForSomeoneElse = activeReservations
+            .filter((r) => r.workerId !== dto.workerId && r.startAt.getTime() >= occurredAt.getTime())
+            .sort((a, b) => a.startAt.getTime() - b.startAt.getTime())[0];
+
+          if (nextForSomeoneElse) {
+            const gap = nextForSomeoneElse.startAt.getTime() - occurredAt.getTime();
+            if (gap < MIN_LOAN_BEFORE_RESERVATION_MS) {
+              return replayOrThrow(
+                this.movementModel,
+                dto.idempotencyKey,
+                () =>
+                  new ConflictException(
+                    `Asset ${dto.assetId} is reserved for ${nextForSomeoneElse.workerId} from ` +
+                      `${nextForSomeoneElse.startAt.toISOString()}, leaving less than ` +
+                      `${Math.round(MIN_LOAN_BEFORE_RESERVATION_MS / 60000)} minutes to lend it`,
+                  ),
+              );
+            }
+            if (dueAt.getTime() > nextForSomeoneElse.startAt.getTime()) {
+              throw new UnprocessableEntityException(
+                `Asset ${dto.assetId} is reserved for ${nextForSomeoneElse.workerId} from ` +
+                  `${nextForSomeoneElse.startAt.toISOString()}, so it cannot be due back ` +
+                  `${dueAt.toISOString()}`,
+              );
+            }
+          }
+        }
         const updatedAsset = await this.assetModel.findOneAndUpdate(
           { _id: dto.assetId, status: AssetStatus.IN_STORE },
           {
@@ -87,27 +176,18 @@ export class MovementsService {
           throw new ConflictException(`Asset ${dto.assetId} is not available to issue`);
         }
 
-        // Fulfilled before the movement is written, because a reservation the worker is
-        // collecting against already states when the asset is due back: the keeper should
-        // not have to retype it. An explicit dueAt on the request still wins.
-        const fulfilledReservation = dto.reservationId
-          ? await this.reservationModel.findOneAndUpdate(
-              { _id: dto.reservationId, status: ReservationStatus.ACTIVE },
-              { $set: { status: ReservationStatus.FULFILLED } },
-              { session, new: true },
-            )
-          : null;
-        // A reservation whose window has already closed by the time the worker actually
-        // turns up is still the booking they came to collect against, but its end time is
-        // no longer a due-back time — so it supplies none, rather than one that would
-        // read as overdue the instant it was written. An explicit dueAt is validated in
-        // issue() above and always wins.
-        const derivedDueAt = fulfilledReservation?.endAt ?? null;
-        const dueAt = dto.dueAt
-          ? new Date(dto.dueAt)
-          : derivedDueAt && derivedDueAt.getTime() > occurredAt.getTime()
-            ? derivedDueAt
-            : null;
+        // The booking, if any, that this loan collects: the same worker, on this asset,
+        // with a window the loan falls inside. Found rather than asserted by the caller,
+        // so it is impossible to hand an asset to its reserving worker inside their own
+        // window without the record saying that is what happened.
+        const collected = collectableReservation;
+        if (collected) {
+          await this.reservationModel.findOneAndUpdate(
+            { _id: collected._id, status: ReservationStatus.ACTIVE },
+            { $set: { status: ReservationStatus.FULFILLED, fulfilledByMovementId: movementId } },
+            { session },
+          );
+        }
 
         const [movement] = await this.movementModel.create(
           [
@@ -122,6 +202,7 @@ export class MovementsService {
               idempotencyKey: dto.idempotencyKey,
               correctionOf: null,
               correctedBy: null,
+              reservationId: collected?._id ?? null,
               reason: null,
               loggedBy: dto.loggedBy ?? null,
             },
@@ -218,6 +299,7 @@ export class MovementsService {
               idempotencyKey: dto.idempotencyKey,
               correctionOf: null,
               correctedBy: null,
+              reservationId: null,
               reason: null,
               loggedBy: dto.loggedBy ?? null,
             },
@@ -311,6 +393,17 @@ export class MovementsService {
         // keeper happened to type. Same rule issue() enforces on the original write.
         const effectiveOccurredAt = dto.occurredAt ? new Date(dto.occurredAt) : original.occurredAt;
         const effectiveDueAt = dto.dueAt ? new Date(dto.dueAt) : original.dueAt ?? null;
+
+        // A due date pinned by a booking cannot be moved one step later by correcting it:
+        // the booking still states when the asset is free again. Correcting the time it
+        // happened, or the reason, is unaffected.
+        if (dto.dueAt && original.reservationId) {
+          throw new UnprocessableEntityException(
+            `This issue collected reservation ${String(original.reservationId)}, so its due-back time comes ` +
+              'from that booking and cannot be corrected here. Cancel or re-book the reservation instead.',
+          );
+        }
+
         if (effectiveDueAt && effectiveDueAt.getTime() <= effectiveOccurredAt.getTime()) {
           throw new UnprocessableEntityException(
             `Due back ${effectiveDueAt.toISOString()} is not after the issue at ${effectiveOccurredAt.toISOString()}`,
@@ -353,6 +446,7 @@ export class MovementsService {
               idempotencyKey: dto.idempotencyKey,
               correctionOf: original._id,
               correctedBy: null,
+              reservationId: original.reservationId ?? null,
               reason: dto.reason ?? null,
               loggedBy: dto.loggedBy ?? null,
             },

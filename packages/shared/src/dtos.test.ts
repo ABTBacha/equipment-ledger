@@ -10,9 +10,19 @@ describe('IssueMovementSchema', () => {
     const result = IssueMovementSchema.safeParse({
       assetId: 'HARN-014',
       workerId: 'worker-ana-rios',
+      dueAt: '2026-09-11T17:00:00Z',
       idempotencyKey: 'a1b2c3',
     });
     expect(result.success).toBe(true);
+  });
+
+  it('rejects an issue with no due-back time, since overdue depends on every loan having one', () => {
+    const result = IssueMovementSchema.safeParse({
+      assetId: 'HARN-014',
+      workerId: 'worker-ana-rios',
+      idempotencyKey: 'a1b2c3',
+    });
+    expect(result.success).toBe(false);
   });
 
   it('rejects a payload missing idempotencyKey', () => {

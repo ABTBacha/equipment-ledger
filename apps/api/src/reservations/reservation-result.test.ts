@@ -16,9 +16,9 @@ function makeReservation(overrides: Partial<RawReservationDoc>): RawReservationD
 }
 
 describe('toReservationResult', () => {
-  it('computes EXPIRED for an ACTIVE reservation whose window has already passed', () => {
+  it('reads an ACTIVE reservation whose window passed as NOT_COLLECTED', () => {
     const doc = makeReservation({ startAt: new Date('2020-01-01T09:00:00Z'), endAt: new Date('2020-01-01T10:00:00Z') });
-    expect(toReservationResult(doc).status).toBe(ReservationStatus.EXPIRED);
+    expect(toReservationResult(doc).status).toBe(ReservationStatus.NOT_COLLECTED);
   });
 
   it('leaves an ACTIVE reservation with a still-future window as ACTIVE', () => {
@@ -37,5 +37,43 @@ describe('toReservationResult', () => {
     const doc = makeReservation({ startAt: new Date('2020-01-01T09:00:00Z'), endAt: new Date('2020-01-01T10:00:00Z') });
     toReservationResult(doc);
     expect(doc.status).toBe(ReservationStatus.ACTIVE);
+  });
+
+  it('reads a collected booking as OVERDUE while its loan is still open past the window', () => {
+    const movementId = new Types.ObjectId();
+    const doc = makeReservation({
+      startAt: new Date('2020-01-01T09:00:00Z'),
+      endAt: new Date('2020-01-01T10:00:00Z'),
+      status: ReservationStatus.FULFILLED,
+      fulfilledByMovementId: movementId,
+    });
+
+    const openMovementIds = new Set([String(movementId)]);
+    expect(toReservationResult(doc, openMovementIds).status).toBe(ReservationStatus.OVERDUE);
+  });
+
+  it('leaves a collected booking FULFILLED once the asset is back, however late', () => {
+    const movementId = new Types.ObjectId();
+    const doc = makeReservation({
+      startAt: new Date('2020-01-01T09:00:00Z'),
+      endAt: new Date('2020-01-01T10:00:00Z'),
+      status: ReservationStatus.FULFILLED,
+      fulfilledByMovementId: movementId,
+    });
+
+    expect(toReservationResult(doc, new Set<string>()).status).toBe(ReservationStatus.FULFILLED);
+  });
+
+  it('does not call a collected booking OVERDUE while its window is still open', () => {
+    const movementId = new Types.ObjectId();
+    const future = new Date(Date.now() + 60 * 60 * 1000);
+    const doc = makeReservation({
+      startAt: new Date(Date.now() - 60 * 60 * 1000),
+      endAt: future,
+      status: ReservationStatus.FULFILLED,
+      fulfilledByMovementId: movementId,
+    });
+
+    expect(toReservationResult(doc, new Set([String(movementId)])).status).toBe(ReservationStatus.FULFILLED);
   });
 });

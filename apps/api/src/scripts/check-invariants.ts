@@ -122,11 +122,96 @@ export async function checkInvariants(uri: string): Promise<InvariantViolation[]
     // out-of-service movement has nothing to be due, and a dueAt sitting on one would
     // mean the overdue reading came from somewhere the model does not define.
     for (const m of movementDocs) {
+      if (m.type === 'ISSUE' && !m.dueAt) {
+        violations.push({
+          rule: 'issue-has-due-date',
+          detail: `Movement ${m._id} is an ISSUE with no dueAt, so nothing can say whether it is overdue`,
+        });
+      }
       if (m.dueAt && m.type !== 'ISSUE') {
         violations.push({
           rule: 'due-only-on-issue',
           detail: `Movement ${m._id} is a ${m.type} but carries dueAt ${m.dueAt.toISOString()}`,
         });
+      }
+    }
+
+    // Rule 6: the collection link agrees in both directions. A booking says which issue
+    // collected it and that issue says which booking it collected; either half alone is a
+    // claim nothing corroborates. Corrections inherit the link, so a correction of the
+    // collecting issue satisfies it too.
+    const allReservations = await ReservationModel.find({}).lean();
+    const correctionOfByOriginal = new Map(
+      movementDocs.filter((m) => m.correctionOf).map((m) => [String(m.correctionOf), String(m._id)]),
+    );
+    for (const r of allReservations) {
+      if (r.status === 'FULFILLED' && !r.fulfilledByMovementId) {
+        violations.push({
+          rule: 'reservation-collection-link',
+          detail: `Reservation ${r._id} is FULFILLED but names no collecting movement`,
+        });
+        continue;
+      }
+      if (!r.fulfilledByMovementId) continue;
+      const collector = movementById.get(String(r.fulfilledByMovementId));
+      if (!collector) {
+        violations.push({
+          rule: 'reservation-collection-link',
+          detail: `Reservation ${r._id} names a collecting movement ${r.fulfilledByMovementId} that does not exist`,
+        });
+      } else if (String(collector.reservationId) !== String(r._id)) {
+        violations.push({
+          rule: 'reservation-collection-link',
+          detail: `Reservation ${r._id} is collected by movement ${collector._id}, which points at ${collector.reservationId}`,
+        });
+      }
+    }
+    for (const m of movementDocs) {
+      if (m.reservationId && m.type !== 'ISSUE') {
+        violations.push({
+          rule: 'reservation-collection-link',
+          detail: `Movement ${m._id} is a ${m.type} but claims to collect reservation ${m.reservationId}`,
+        });
+      }
+    }
+
+    // Rule 7: the rule this whole design exists for, checked against the ledger rather than
+    // trusted to the door it is enforced at. Replaying holdings, no live booking may overlap
+    // a period when somebody else had the asset in their hands.
+    const holdings: { assetId: string; workerId: string | null; from: Date; to: Date | null }[] = [];
+    const byAssetEffective = new Map<string, typeof effective>();
+    for (const m of effective) {
+      const list = byAssetEffective.get(m.assetId) ?? [];
+      list.push(m);
+      byAssetEffective.set(m.assetId, list);
+    }
+    for (const [assetId, moves] of byAssetEffective) {
+      const sorted = [...moves].sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime() || a.id.localeCompare(b.id));
+      let open: { workerId: string | null; from: Date } | null = null;
+      for (const m of sorted) {
+        if (m.type === 'ISSUE') {
+          open = { workerId: m.workerId, from: m.occurredAt };
+        } else if (open) {
+          holdings.push({ assetId, workerId: open.workerId, from: open.from, to: m.occurredAt });
+          open = null;
+        }
+      }
+      if (open) holdings.push({ assetId, workerId: open.workerId, from: open.from, to: null });
+    }
+
+    for (const r of allReservations) {
+      if (r.status === 'CANCELLED') continue;
+      for (const h of holdings.filter((x) => x.assetId === r.assetId && x.workerId !== r.workerId)) {
+        const heldUntil = h.to ?? new Date(8640000000000000);
+        if (intervalsOverlap(r.startAt, r.endAt, h.from, heldUntil)) {
+          violations.push({
+            rule: 'no-reservation-held-by-another',
+            detail:
+              `Reservation ${r._id} for ${r.workerId} on ${r.assetId} ` +
+              `(${r.startAt.toISOString()}..${r.endAt.toISOString()}) overlaps ${h.workerId} holding it from ` +
+              `${h.from.toISOString()}`,
+          });
+        }
       }
     }
 

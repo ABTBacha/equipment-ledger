@@ -41,21 +41,42 @@ describe('Main scenario (e2e)', () => {
     // seed() guarantees no generated movement's occurredAt ever reaches or exceeds `fixedNow`
     // itself, so fixedNow + 1h is a safe anchor no matter which asset is picked.
     const sequenceStart = new Date(fixedNow.getTime() + 60 * 60 * 1000);
+    // Every loan has to say when it ends; eight hours after the scenario starts keeps the
+    // whole sequence (backdated return, correction, as-of query) inside one working day.
+    const sequenceDueAt = new Date(sequenceStart.getTime() + 8 * 60 * 60 * 1000);
 
     // 1. Issue.
     await request(app.getHttpServer())
       .post('/movements/issue')
-      .send({ assetId: scenarioAssetId, workerId: scenarioWorkerA, occurredAt: sequenceStart.toISOString(), idempotencyKey: 'e2e-issue-1' })
+      .send({
+        assetId: scenarioAssetId,
+        workerId: scenarioWorkerA,
+        occurredAt: sequenceStart.toISOString(),
+        dueAt: sequenceDueAt.toISOString(),
+        idempotencyKey: 'e2e-issue-1',
+      })
       .expect(201);
 
     // 2. Try to issue the same asset again, concurrently, twice at once.
     const [a, b] = await Promise.allSettled([
       request(app.getHttpServer())
         .post('/movements/issue')
-        .send({ assetId: scenarioAssetId, workerId: scenarioWorkerB, idempotencyKey: 'e2e-issue-race-a' }),
+        .send({
+          assetId: scenarioAssetId,
+          workerId: scenarioWorkerB,
+          occurredAt: new Date(sequenceStart.getTime() + 60 * 1000).toISOString(),
+          dueAt: sequenceDueAt.toISOString(),
+          idempotencyKey: 'e2e-issue-race-a',
+        }),
       request(app.getHttpServer())
         .post('/movements/issue')
-        .send({ assetId: scenarioAssetId, workerId: scenarioWorkerB, idempotencyKey: 'e2e-issue-race-b' }),
+        .send({
+          assetId: scenarioAssetId,
+          workerId: scenarioWorkerB,
+          occurredAt: new Date(sequenceStart.getTime() + 60 * 1000).toISOString(),
+          dueAt: sequenceDueAt.toISOString(),
+          idempotencyKey: 'e2e-issue-race-b',
+        }),
     ]);
     const raceStatuses = [a, b].map((r) => (r.status === 'fulfilled' ? r.value.status : null));
     expect(raceStatuses.filter((s) => s === 409)).toHaveLength(2);

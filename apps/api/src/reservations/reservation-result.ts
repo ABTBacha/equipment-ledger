@@ -10,6 +10,8 @@ export interface ReservationResult {
   status: ReservationStatus;
   idempotencyKey: string;
   cancelReason: string | null;
+  /** The issue that collected this booking, if it was collected. */
+  fulfilledByMovementId: string | null;
 }
 
 /**
@@ -26,14 +28,39 @@ export interface RawReservationDoc {
   status: ReservationStatus;
   idempotencyKey: string;
   cancelReason?: string | null;
+  fulfilledByMovementId?: Types.ObjectId | string | null;
 }
 
-export function toReservationResult(doc: RawReservationDoc): ReservationResult {
-  // EXPIRED is a read-time computed view, not a stored status: a reservation that never
-  // got fulfilled or cancelled and whose window has simply passed should read as EXPIRED
-  // everywhere it's returned, without ever mutating the stored document (matching the
-  // README's "computed lazily on read" description).
-  const status = doc.status === ReservationStatus.ACTIVE && doc.endAt.getTime() < Date.now() ? ReservationStatus.EXPIRED : doc.status;
+/**
+ * Two of the five statuses are computed here rather than stored, because both are things the
+ * clock makes true about a stored row and nothing would be there to write them:
+ *
+ * - NOT_COLLECTED: still ACTIVE, window gone. Nobody came for it.
+ * - OVERDUE: collected, window gone, and the loan that collected it is still open. Nobody
+ *   brought it back. Once it is back the booking reads FULFILLED again, however late the
+ *   return was — that is history, not an outstanding problem.
+ *
+ * `openMovementIds` is the set of issue ids assets are currently out on, passed in by the
+ * caller so a page of reservations costs one extra query rather than one per row. Omitting it
+ * means "nothing is open", which is the right answer for a caller that has no asset state to
+ * hand and only wants the stored view.
+ */
+export function toReservationResult(
+  doc: RawReservationDoc,
+  openMovementIds: ReadonlySet<string> = new Set(),
+): ReservationResult {
+  const windowPassed = doc.endAt.getTime() < Date.now();
+  const collectingLoanStillOpen =
+    doc.fulfilledByMovementId !== null &&
+    doc.fulfilledByMovementId !== undefined &&
+    openMovementIds.has(String(doc.fulfilledByMovementId));
+
+  let status = doc.status;
+  if (doc.status === ReservationStatus.ACTIVE && windowPassed) {
+    status = ReservationStatus.NOT_COLLECTED;
+  } else if (doc.status === ReservationStatus.FULFILLED && windowPassed && collectingLoanStillOpen) {
+    status = ReservationStatus.OVERDUE;
+  }
   return {
     _id: doc._id.toString(),
     assetId: doc.assetId,
@@ -43,5 +70,6 @@ export function toReservationResult(doc: RawReservationDoc): ReservationResult {
     status,
     idempotencyKey: doc.idempotencyKey,
     cancelReason: doc.cancelReason ?? null,
+    fulfilledByMovementId: doc.fulfilledByMovementId ? String(doc.fulfilledByMovementId) : null,
   };
 }

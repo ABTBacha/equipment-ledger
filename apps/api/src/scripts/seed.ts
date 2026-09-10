@@ -75,6 +75,7 @@ interface SeedMovement {
   idempotencyKey: string;
   correctionOf: Types.ObjectId | null;
   correctedBy: Types.ObjectId | null;
+  reservationId: Types.ObjectId | null;
   reason: string | null;
 }
 
@@ -89,12 +90,13 @@ function buildMovementsAndPatches(
   workers: ReturnType<typeof buildWorkers>,
   now: Date,
   rng: () => number,
+  reservations: ReturnType<typeof buildReservations>,
+  outOfServiceAssetId: string,
 ) {
   const movements: SeedMovement[] = [];
   const patches = new Map<string, AssetPatch>();
   const windowStart = new Date(now.getTime() - WINDOW_DAYS * DAY_MS);
 
-  const outOfServiceAssetId = assets[5]._id; // GASD-006
   const overdueAssetId = assets[0]._id; // DRILL-001
   const lateLoggedAssetId = assets[1]._id; // GRIND-002
   const correctedAssetId = assets[2]._id; // LADR-003
@@ -110,7 +112,13 @@ function buildMovementsAndPatches(
     return from[Math.floor(rng() * from.length)];
   };
 
+  const reservationsByAsset = new Map(reservations.map((r) => [r.assetId, r]));
+
   for (const asset of assets) {
+    // A booked asset gets exactly the movements its booking implies (below), and is kept
+    // out of the random traffic that knows nothing about windows.
+    if (reservationsByAsset.has(asset._id)) continue;
+
     if (asset._id === outOfServiceAssetId) {
       const occurredAt = new Date(windowStart.getTime() + 2 * DAY_MS);
       movements.push({
@@ -124,6 +132,7 @@ function buildMovementsAndPatches(
         idempotencyKey: `seed-oos-${asset._id}`,
         correctionOf: null,
         correctedBy: null,
+        reservationId: null,
         reason: 'Seeded as damaged',
       });
       patches.set(asset._id, { status: 'OUT_OF_SERVICE', currentHolderId: null, currentMovementId: null });
@@ -146,6 +155,7 @@ function buildMovementsAndPatches(
         idempotencyKey: `seed-issue-overdue-${asset._id}`,
         correctionOf: null,
         correctedBy: null,
+        reservationId: null,
         reason: null,
       });
       patches.set(asset._id, { status: 'ISSUED', currentHolderId: worker._id, currentMovementId: String(id) });
@@ -162,10 +172,11 @@ function buildMovementsAndPatches(
         type: 'ISSUE',
         occurredAt: issueOccurredAt,
         recordedAt: issueOccurredAt,
-        dueAt: null,
+        dueAt: new Date(issueOccurredAt.getTime() + 8 * 60 * 60 * 1000),
         idempotencyKey: `seed-issue-late-${asset._id}`,
         correctionOf: null,
         correctedBy: null,
+        reservationId: null,
         reason: null,
       });
       const returnOccurredAt = new Date(issueOccurredAt.getTime() + 8 * 60 * 60 * 1000);
@@ -181,6 +192,7 @@ function buildMovementsAndPatches(
         idempotencyKey: `seed-return-late-${asset._id}`,
         correctionOf: null,
         correctedBy: null,
+        reservationId: null,
         reason: null,
       });
       patches.set(asset._id, { status: 'IN_STORE', currentHolderId: null, currentMovementId: null });
@@ -197,10 +209,11 @@ function buildMovementsAndPatches(
         type: 'ISSUE',
         occurredAt: issueOccurredAt,
         recordedAt: issueOccurredAt,
-        dueAt: null,
+        dueAt: new Date(issueOccurredAt.getTime() + 8 * 60 * 60 * 1000),
         idempotencyKey: `seed-issue-corrected-${asset._id}`,
         correctionOf: null,
         correctedBy: null,
+        reservationId: null,
         reason: null,
       });
       const wrongReturnId = new Types.ObjectId();
@@ -217,6 +230,7 @@ function buildMovementsAndPatches(
         idempotencyKey: `seed-return-corrected-${asset._id}`,
         correctionOf: null,
         correctedBy: correctionId,
+        reservationId: null,
         reason: null,
       });
       movements.push({
@@ -230,6 +244,7 @@ function buildMovementsAndPatches(
         idempotencyKey: `seed-correction-${asset._id}`,
         correctionOf: wrongReturnId,
         correctedBy: null,
+        reservationId: null,
         reason: 'Keeper logged the wrong return time',
       });
       patches.set(asset._id, { status: 'IN_STORE', currentHolderId: null, currentMovementId: null });
@@ -255,10 +270,11 @@ function buildMovementsAndPatches(
         type: 'ISSUE',
         occurredAt: issueOccurredAt,
         recordedAt: issueOccurredAt,
-        dueAt: null,
+        dueAt: new Date(issueOccurredAt.getTime() + 8 * 60 * 60 * 1000),
         idempotencyKey: `seed-issue-${asset._id}-${p}`,
         correctionOf: null,
         correctedBy: null,
+        reservationId: null,
         reason: null,
       });
 
@@ -287,6 +303,7 @@ function buildMovementsAndPatches(
         idempotencyKey: `seed-return-${asset._id}-${p}`,
         correctionOf: null,
         correctedBy: null,
+        reservationId: null,
         reason: null,
       });
       patches.set(asset._id, { status: 'IN_STORE', currentHolderId: null, currentMovementId: null });
@@ -294,35 +311,135 @@ function buildMovementsAndPatches(
     }
   }
 
+  // The two bookings that were collected. Collecting pins the loan to the window, so both
+  // carry dueAt = the reservation end, and the link is written from both ends.
+  for (const reservation of reservations) {
+    if (reservation.status !== 'FULFILLED') continue;
+    const issueId = new Types.ObjectId();
+    const stillOut = reservation.endAt.getTime() < now.getTime() && reservation.idempotencyKey.includes('overdue');
+
+    movements.push({
+      _id: issueId,
+      assetId: reservation.assetId,
+      workerId: reservation.workerId,
+      type: 'ISSUE',
+      occurredAt: reservation.startAt,
+      recordedAt: reservation.startAt,
+      dueAt: reservation.endAt,
+      idempotencyKey: `seed-issue-collect-${reservation.assetId}`,
+      correctionOf: null,
+      correctedBy: null,
+      reservationId: reservation._id,
+      reason: null,
+    });
+    reservation.fulfilledByMovementId = issueId;
+
+    if (stillOut) {
+      // Collected and never brought back: the asset reads overdue and so does the booking.
+      patches.set(reservation.assetId, { status: 'ISSUED', currentHolderId: reservation.workerId, currentMovementId: String(issueId) });
+    } else {
+      movements.push({
+        _id: new Types.ObjectId(),
+        assetId: reservation.assetId,
+        workerId: reservation.workerId,
+        type: 'RETURN',
+        occurredAt: new Date(reservation.endAt.getTime() - 30 * 60 * 1000),
+        recordedAt: new Date(reservation.endAt.getTime() - 30 * 60 * 1000),
+        dueAt: null,
+        idempotencyKey: `seed-return-collect-${reservation.assetId}`,
+        correctionOf: null,
+        correctedBy: null,
+        reservationId: null,
+        reason: null,
+      });
+    }
+  }
+
   return { movements, patches, outOfServiceAssetId };
 }
 
-function buildReservations(assets: ReturnType<typeof buildAssets>, workers: ReturnType<typeof buildWorkers>, now: Date, outOfServiceAssetId: string) {
-  const reservable = assets.filter((a) => a._id !== outOfServiceAssetId);
-  const neverCollectedAsset = reservable[reservable.length - 1];
-  const pastActiveAsset = reservable[reservable.length - 2];
+/**
+ * Built before any movement, because a booking constrains who may hold the asset: the
+ * ordinary-traffic loop has to know which windows exist before it hands anything out.
+ * Otherwise the seed generates the very state the gating forbids — an asset issued to one
+ * worker inside another worker's window — which is how that state came to be in the store
+ * in the first place.
+ *
+ * Four bookings, one per ending a reservation can have:
+ *  - a future window nobody has collected yet (ACTIVE)
+ *  - a past window nobody ever collected (reads NOT_COLLECTED)
+ *  - a past window collected and returned (FULFILLED)
+ *  - a past window collected and still not back (reads OVERDUE)
+ */
+interface SeedReservation {
+  _id: Types.ObjectId;
+  assetId: string;
+  workerId: string;
+  startAt: Date;
+  endAt: Date;
+  status: 'ACTIVE' | 'FULFILLED';
+  idempotencyKey: string;
+  fulfilledByMovementId: Types.ObjectId | null;
+}
 
+function buildReservations(
+  assets: ReturnType<typeof buildAssets>,
+  workers: ReturnType<typeof buildWorkers>,
+  now: Date,
+  outOfServiceAssetId: string,
+): SeedReservation[] {
+  const reservable = assets.filter((a) => a._id !== outOfServiceAssetId);
+  const upcomingAsset = reservable[reservable.length - 1];
+  const neverCollectedAsset = reservable[reservable.length - 2];
+  const collectedAndReturnedAsset = reservable[reservable.length - 3];
+  const collectedAndOverdueAsset = reservable[reservable.length - 4];
+
+  const hours = (n: number) => n * 60 * 60 * 1000;
   const futureStart = new Date(now.getTime() + 5 * DAY_MS);
-  const futureEnd = new Date(futureStart.getTime() + 8 * 60 * 60 * 1000);
   const pastStart = new Date(now.getTime() - 20 * DAY_MS);
-  const pastEnd = new Date(pastStart.getTime() + 8 * 60 * 60 * 1000);
+  const returnedStart = new Date(now.getTime() - 12 * DAY_MS);
+  const overdueStart = new Date(now.getTime() - 4 * DAY_MS);
 
   return [
     {
-      assetId: neverCollectedAsset._id,
+      _id: new Types.ObjectId(),
+      assetId: upcomingAsset._id,
       workerId: workers[2]._id,
       startAt: futureStart,
-      endAt: futureEnd,
-      status: 'ACTIVE',
-      idempotencyKey: `seed-reservation-future-${neverCollectedAsset._id}`,
+      endAt: new Date(futureStart.getTime() + hours(8)),
+      status: 'ACTIVE' as const,
+      fulfilledByMovementId: null,
+      idempotencyKey: `seed-reservation-future-${upcomingAsset._id}`,
     },
     {
-      assetId: pastActiveAsset._id,
+      _id: new Types.ObjectId(),
+      assetId: neverCollectedAsset._id,
       workerId: workers[3]._id,
       startAt: pastStart,
-      endAt: pastEnd,
-      status: 'ACTIVE',
-      idempotencyKey: `seed-reservation-past-${pastActiveAsset._id}`,
+      endAt: new Date(pastStart.getTime() + hours(8)),
+      status: 'ACTIVE' as const,
+      fulfilledByMovementId: null,
+      idempotencyKey: `seed-reservation-past-${neverCollectedAsset._id}`,
+    },
+    {
+      _id: new Types.ObjectId(),
+      assetId: collectedAndReturnedAsset._id,
+      workerId: workers[4]._id,
+      startAt: returnedStart,
+      endAt: new Date(returnedStart.getTime() + hours(8)),
+      status: 'FULFILLED' as const,
+      fulfilledByMovementId: null,
+      idempotencyKey: `seed-reservation-collected-${collectedAndReturnedAsset._id}`,
+    },
+    {
+      _id: new Types.ObjectId(),
+      assetId: collectedAndOverdueAsset._id,
+      workerId: workers[5]._id,
+      startAt: overdueStart,
+      endAt: new Date(overdueStart.getTime() + hours(8)),
+      status: 'FULFILLED' as const,
+      fulfilledByMovementId: null,
+      idempotencyKey: `seed-reservation-overdue-${collectedAndOverdueAsset._id}`,
     },
   ];
 }
@@ -347,8 +464,10 @@ export async function seed(uri: string, now: Date = new Date()) {
     const rng = mulberry32(SEED);
     const assets = buildAssets();
     const workers = buildWorkers(now);
-    const { movements, patches, outOfServiceAssetId } = buildMovementsAndPatches(assets, workers, now, rng);
+    // Bookings first: they decide which assets the traffic loop must leave alone.
+    const outOfServiceAssetId = assets[5]._id; // GASD-006
     const reservations = buildReservations(assets, workers, now, outOfServiceAssetId);
+    const { movements, patches } = buildMovementsAndPatches(assets, workers, now, rng, reservations, outOfServiceAssetId);
 
     await WorkerModel.insertMany(workers);
 

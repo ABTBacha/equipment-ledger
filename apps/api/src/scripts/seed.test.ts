@@ -100,4 +100,45 @@ describe('seed', () => {
     const misplaced = await MovementModel.find({ type: { $ne: 'ISSUE' }, dueAt: { $ne: null } }).lean();
     expect(misplaced).toHaveLength(0);
   });
+
+  it('seeds a booking nobody collected and one collected but never returned', async () => {
+    const fixedNow = new Date('2026-09-08T12:00:00Z');
+    await seed(process.env.MONGO_URI!, fixedNow);
+
+    const reservations = await ReservationModel.find({}).lean();
+
+    const uncollected = reservations.filter(
+      (r) => r.status === 'ACTIVE' && r.endAt.getTime() < fixedNow.getTime(),
+    );
+    expect(uncollected.length).toBeGreaterThanOrEqual(1);
+
+    const collected = reservations.filter((r) => r.status === 'FULFILLED');
+    expect(collected.length).toBeGreaterThanOrEqual(2);
+    for (const r of collected) {
+      expect(r.fulfilledByMovementId).not.toBeNull();
+    }
+
+    // One of them is still out: its collecting issue is the asset's open movement.
+    const assets = await AssetModel.find({}).lean();
+    const stillOut = collected.filter((r) => {
+      const asset = assets.find((a) => a._id === r.assetId);
+      return asset?.currentMovementId === String(r.fulfilledByMovementId);
+    });
+    expect(stillOut).toHaveLength(1);
+    expect(stillOut[0].endAt.getTime()).toBeLessThan(fixedNow.getTime());
+  });
+
+  it('never issues a seeded asset inside a window somebody else booked', async () => {
+    const fixedNow = new Date('2026-09-08T12:00:00Z');
+    await seed(process.env.MONGO_URI!, fixedNow);
+
+    const reservations = await ReservationModel.find({}).lean();
+    const assets = await AssetModel.find({}).lean();
+
+    for (const r of reservations) {
+      const asset = assets.find((a) => a._id === r.assetId);
+      if (asset?.status !== 'ISSUED') continue;
+      expect(asset.currentHolderId).toBe(r.workerId);
+    }
+  });
 });

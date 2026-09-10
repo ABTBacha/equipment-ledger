@@ -46,7 +46,7 @@ describe('WorkersService', () => {
   it('findOne reports the assets a worker currently holds', async () => {
     await workerModel.create({ _id: 'worker-2', name: 'Ben Cole', certifications: [{ code: 'GAS-DETECT', expiresAt: new Date('2020-01-01') }] });
     await assetModel.create({ _id: 'DRILL-003', kind: 'drill', requiresCertification: null });
-    await movementsService.issue({ assetId: 'DRILL-003', workerId: 'worker-2', idempotencyKey: 'wk-issue-1' });
+    await movementsService.issue({ assetId: 'DRILL-003', workerId: 'worker-2', dueAt: new Date(Date.now() + 8 * 3600_000).toISOString(), idempotencyKey: 'wk-issue-1' });
 
     const worker = await service.findOne('worker-2');
     expect(worker.currentlyHolding).toHaveLength(1);
@@ -62,8 +62,8 @@ describe('WorkersService', () => {
     await workerModel.create({ _id: 'worker-findall-empty', name: 'Dev Singh', certifications: [] });
     await assetModel.create({ _id: 'TESTASSET-FINDALL-1', kind: 'drill', requiresCertification: null });
     await assetModel.create({ _id: 'TESTASSET-FINDALL-2', kind: 'drill', requiresCertification: null });
-    await movementsService.issue({ assetId: 'TESTASSET-FINDALL-1', workerId: 'worker-findall-holder', idempotencyKey: 'wk-issue-2' });
-    await movementsService.issue({ assetId: 'TESTASSET-FINDALL-2', workerId: 'worker-findall-holder', idempotencyKey: 'wk-issue-3' });
+    await movementsService.issue({ assetId: 'TESTASSET-FINDALL-1', workerId: 'worker-findall-holder', dueAt: new Date(Date.now() + 8 * 3600_000).toISOString(), idempotencyKey: 'wk-issue-2' });
+    await movementsService.issue({ assetId: 'TESTASSET-FINDALL-2', workerId: 'worker-findall-holder', dueAt: new Date(Date.now() + 8 * 3600_000).toISOString(), idempotencyKey: 'wk-issue-3' });
 
     const findSpy = jest.spyOn(assetModel, 'find');
     const workers = await service.findAll();
@@ -133,7 +133,7 @@ describe('WorkersService', () => {
       await assetModel.create({ _id: 'FORK-001', kind: 'forklift', requiresCertification: 'FORKLIFT' });
 
       await expect(
-        movementsService.issue({ assetId: 'FORK-001', workerId: 'worker-certs', idempotencyKey: 'cert-issue-1' }),
+        movementsService.issue({ assetId: 'FORK-001', workerId: 'worker-certs', dueAt: new Date(Date.now() + 8 * 3600_000).toISOString(), idempotencyKey: 'cert-issue-1' }),
       ).rejects.toThrow(/expired/i);
 
       await service.upsertCertification('worker-certs', { code: 'FORKLIFT', expiresAt: '2029-01-01T00:00:00.000Z' });
@@ -141,6 +141,7 @@ describe('WorkersService', () => {
       const movement = await movementsService.issue({
         assetId: 'FORK-001',
         workerId: 'worker-certs',
+        dueAt: new Date(Date.now() + 8 * 3600_000).toISOString(),
         idempotencyKey: 'cert-issue-2',
       });
       expect(movement.type).toBe('ISSUE');

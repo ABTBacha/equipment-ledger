@@ -41,6 +41,7 @@ describe('checkInvariants', () => {
       type: 'ISSUE',
       occurredAt: new Date('2026-08-01T09:00:00Z'),
       recordedAt: new Date('2026-08-01T09:00:00Z'),
+      dueAt: new Date('2026-08-01T17:00:00Z'),
       idempotencyKey: 'inv-ok-1',
     });
 
@@ -177,5 +178,80 @@ describe('checkInvariants', () => {
 
     const violations = await checkInvariants(process.env.MONGO_URI!);
     expect(violations.some((v) => v.rule === 'due-only-on-issue')).toBe(true);
+  });
+
+  it('reports a violation when a booking overlaps somebody else holding the asset', async () => {
+    await AssetModel.deleteMany({});
+    await MovementModel.deleteMany({});
+    await ReservationModel.deleteMany({});
+    await AssetModel.create({ _id: 'CLASH-1', kind: 'drill', requiresCertification: null, status: 'ISSUED', currentHolderId: 'worker-1' });
+    await MovementModel.create({
+      assetId: 'CLASH-1',
+      workerId: 'worker-1',
+      type: 'ISSUE',
+      occurredAt: new Date('2026-08-01T09:00:00Z'),
+      recordedAt: new Date('2026-08-01T09:00:00Z'),
+      dueAt: new Date('2026-08-01T17:00:00Z'),
+      idempotencyKey: 'clash-issue',
+    });
+    await ReservationModel.create({
+      assetId: 'CLASH-1',
+      workerId: 'worker-2',
+      startAt: new Date('2026-08-01T10:00:00Z'),
+      endAt: new Date('2026-08-01T12:00:00Z'),
+      status: 'ACTIVE',
+      idempotencyKey: 'clash-res',
+    });
+
+    const violations = await checkInvariants(process.env.MONGO_URI!);
+    expect(violations.some((v) => v.rule === 'no-reservation-held-by-another')).toBe(true);
+  });
+
+  it('reports a violation when a fulfilled booking names no collecting movement', async () => {
+    await AssetModel.deleteMany({});
+    await MovementModel.deleteMany({});
+    await ReservationModel.deleteMany({});
+    await AssetModel.create({ _id: 'LINK-1', kind: 'drill', requiresCertification: null, status: 'IN_STORE', currentHolderId: null });
+    await ReservationModel.create({
+      assetId: 'LINK-1',
+      workerId: 'worker-1',
+      startAt: new Date('2026-08-01T10:00:00Z'),
+      endAt: new Date('2026-08-01T12:00:00Z'),
+      status: 'FULFILLED',
+      idempotencyKey: 'link-res',
+    });
+
+    const violations = await checkInvariants(process.env.MONGO_URI!);
+    expect(violations.some((v) => v.rule === 'reservation-collection-link')).toBe(true);
+  });
+
+  it('reports a violation when the collection link disagrees between the two documents', async () => {
+    await AssetModel.deleteMany({});
+    await MovementModel.deleteMany({});
+    await ReservationModel.deleteMany({});
+    await AssetModel.create({ _id: 'LINK-2', kind: 'drill', requiresCertification: null, status: 'IN_STORE', currentHolderId: null });
+    const other = new mongoose.Types.ObjectId();
+    const movement = await MovementModel.create({
+      assetId: 'LINK-2',
+      workerId: 'worker-1',
+      type: 'ISSUE',
+      occurredAt: new Date('2026-08-01T10:00:00Z'),
+      recordedAt: new Date('2026-08-01T10:00:00Z'),
+      dueAt: new Date('2026-08-01T12:00:00Z'),
+      reservationId: other,
+      idempotencyKey: 'link-2-issue',
+    });
+    await ReservationModel.create({
+      assetId: 'LINK-2',
+      workerId: 'worker-1',
+      startAt: new Date('2026-08-01T10:00:00Z'),
+      endAt: new Date('2026-08-01T12:00:00Z'),
+      status: 'FULFILLED',
+      fulfilledByMovementId: movement._id,
+      idempotencyKey: 'link-2-res',
+    });
+
+    const violations = await checkInvariants(process.env.MONGO_URI!);
+    expect(violations.some((v) => v.rule === 'reservation-collection-link')).toBe(true);
   });
 });

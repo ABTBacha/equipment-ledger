@@ -43,6 +43,14 @@ export class Movement {
 
   @Prop({ type: String, default: null })
   loggedBy!: string | null;
+
+  /**
+   * The booking this issue collected, if any. Only ever set on an ISSUE (and on a
+   * correction of one, which inherits it so a replay sees the same collection). The
+   * reservation carries the same link back; check-invariants proves they agree.
+   */
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Reservation', default: null })
+  reservationId!: Types.ObjectId | null;
 }
 
 export const MovementSchema = SchemaFactory.createForClass(Movement);

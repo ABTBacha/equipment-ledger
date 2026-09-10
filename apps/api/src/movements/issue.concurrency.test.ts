@@ -49,7 +49,12 @@ describe('MovementsService.issue concurrency', () => {
     }
 
     const attempts = Array.from({ length: 10 }, (_, i) =>
-      service.issue({ assetId: 'DRILL-RACE', workerId: `worker-race-${i}`, idempotencyKey: `race-key-${i}` }),
+      service.issue({
+        assetId: 'DRILL-RACE',
+        workerId: `worker-race-${i}`,
+        dueAt: new Date(Date.now() + 8 * 3600_000).toISOString(),
+        idempotencyKey: `race-key-${i}`,
+      }),
     );
     const settled = await Promise.allSettled(attempts);
 

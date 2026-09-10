@@ -1,15 +1,21 @@
 import { z } from 'zod';
 
+/**
+ * Below this much time before the next reservation starts, an issue that would have to fit
+ * in the gap is refused outright rather than handed out with a due date minutes away.
+ * Never applied to a worker collecting their own booking.
+ */
+export const MIN_LOAN_BEFORE_RESERVATION_MS = 30 * 60 * 1000;
+
 export const IssueMovementSchema = z.object({
   assetId: z.string().min(1),
   workerId: z.string().min(1),
   occurredAt: z.string().datetime().optional(),
-  // When the asset is due back. Optional: the keeper may not know, and an asset issued
-  // without one simply never reads as overdue. Issuing against a reservation defaults it
-  // to that reservation's endAt.
-  dueAt: z.string().datetime().optional(),
+  // When the asset is due back. Required: overdue is only answerable if every loan says
+  // when it ends. An issue that collects a reservation must carry that booking's end time,
+  // and the API refuses any other value rather than silently overriding it.
+  dueAt: z.string().datetime(),
   idempotencyKey: z.string().min(1),
-  reservationId: z.string().min(1).optional(),
   loggedBy: z.string().min(1).optional(),
 });
 export type IssueMovementDto = z.infer<typeof IssueMovementSchema>;

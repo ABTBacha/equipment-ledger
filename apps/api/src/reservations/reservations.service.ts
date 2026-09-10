@@ -4,6 +4,7 @@ import { Connection, Model, Types } from 'mongoose';
 import { AssetStatus, CancelReservationDto, CreateReservationDto, ReservationStatus } from '@equipment-ledger/shared';
 import { Asset } from '../schemas/asset.schema';
 import { Reservation } from '../schemas/reservation.schema';
+import { Movement } from '../schemas/movement.schema';
 import { AssetLock } from '../schemas/asset-lock.schema';
 import { intervalsOverlap } from '../domain/intervals';
 import { withIdempotency, replayOrThrow } from '../domain/idempotency';
@@ -15,6 +16,7 @@ export class ReservationsService {
   constructor(
     @InjectModel(Asset.name) private readonly assetModel: Model<Asset>,
     @InjectModel(Reservation.name) private readonly reservationModel: Model<Reservation>,
+    @InjectModel(Movement.name) private readonly movementModel: Model<Movement>,
     @InjectModel(AssetLock.name) private readonly assetLockModel: Model<AssetLock>,
     @InjectConnection() private readonly connection: Connection,
   ) {}
@@ -58,7 +60,7 @@ export class ReservationsService {
     const cancelled = await this.reservationModel
       .findOneAndUpdate(
         // `endAt` is part of the filter because an ACTIVE reservation whose window has passed
-        // reads as EXPIRED everywhere (see toReservationResult); cancelling one would
+        // reads as NOT_COLLECTED everywhere (see toReservationResult); cancelling one would
         // contradict what the caller was looking at.
         { _id: id, status: ReservationStatus.ACTIVE, endAt: { $gt: new Date() } },
         { $set: { status: ReservationStatus.CANCELLED, cancelReason: dto.reason ?? null } },
@@ -99,6 +101,7 @@ export class ReservationsService {
           throw new ConflictException(`Asset ${dto.assetId} is out of service and cannot be reserved`);
         }
 
+
         // Force serialization: bump a per-asset lock document nonce inside the
         // transaction so that two concurrent reserve() calls for the same asset can
         // never both proceed past this point without one aborting with a write
@@ -109,6 +112,29 @@ export class ReservationsService {
           { $inc: { nonce: 1 } },
           { session, upsert: true, new: true },
         );
+
+        // The mirror of the reservation check issue() makes: an asset promised to somebody
+        // until 17:00 cannot also be booked from 14:00. Read after the lock bump above, so a
+        // concurrent issue() for this asset — which bumps the same document — conflicts
+        // instead of committing in the gap between this read and this transaction's commit.
+        if (asset.status === AssetStatus.ISSUED && asset.currentMovementId) {
+          const openIssue = await this.movementModel.findById(asset.currentMovementId, null, { session }).lean();
+          if (openIssue?.dueAt && openIssue.dueAt.getTime() > startAt.getTime()) {
+            throw new ConflictException({
+              statusCode: 409,
+              error: 'Conflict',
+              code: 'ASSET_OUT_UNTIL',
+              message:
+                `Asset ${dto.assetId} is out with ${asset.currentHolderId} until ` +
+                `${openIssue.dueAt.toISOString()}, so it cannot be reserved from ` +
+                `${startAt.toISOString()}`,
+              conflict: {
+                workerId: asset.currentHolderId,
+                dueAt: openIssue.dueAt.toISOString(),
+              },
+            });
+          }
+        }
 
         const activeReservations = await this.reservationModel
           .find({ assetId: dto.assetId, status: ReservationStatus.ACTIVE }, null, { session })

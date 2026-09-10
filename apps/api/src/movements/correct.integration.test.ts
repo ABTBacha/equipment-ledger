@@ -46,7 +46,7 @@ describe('MovementsService.correct', () => {
   });
 
   it('corrects a movement, leaving the original untouched except correctedBy', async () => {
-    const original = await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'c-issue-1' });
+    const original = await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', dueAt: '2027-01-01T00:00:00Z', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'c-issue-1' });
     const correction = await service.correct(String(original._id), {
       occurredAt: '2026-08-01T09:15:00Z',
       reason: 'Logged the wrong minute',
@@ -63,7 +63,7 @@ describe('MovementsService.correct', () => {
   });
 
   it('rejects correcting a movement that has already been corrected', async () => {
-    const original = await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'c-issue-2' });
+    const original = await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', dueAt: '2027-01-01T00:00:00Z', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'c-issue-2' });
     await service.correct(String(original._id), { occurredAt: '2026-08-01T09:15:00Z', idempotencyKey: 'c-correct-2' });
     await expect(
       service.correct(String(original._id), { occurredAt: '2026-08-01T09:20:00Z', idempotencyKey: 'c-correct-3' }),
@@ -77,7 +77,7 @@ describe('MovementsService.correct', () => {
   });
 
   it('lets exactly one of two simultaneous corrections with different idempotencyKeys succeed, leaving the original pointing at the winner', async () => {
-    const original = await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'c-issue-race' });
+    const original = await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', dueAt: '2027-01-01T00:00:00Z', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'c-issue-race' });
 
     const [a, b] = await Promise.allSettled([
       service.correct(String(original._id), { occurredAt: '2026-08-01T09:10:00Z', reason: 'attempt A', idempotencyKey: 'c-correct-race-a' }),
@@ -105,7 +105,7 @@ describe('MovementsService.correct', () => {
   });
 
   it('replays the same result instead of conflicting when two simultaneous corrections share the same idempotencyKey (double-click)', async () => {
-    const original = await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'c-issue-dbl' });
+    const original = await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', dueAt: '2027-01-01T00:00:00Z', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'c-issue-dbl' });
     const dto = { occurredAt: '2026-08-01T09:10:00Z', reason: 'double click', idempotencyKey: 'c-correct-dbl' };
 
     const [a, b] = await Promise.all([
@@ -126,6 +126,7 @@ describe('MovementsService.correct', () => {
     const original = await service.issue({
       assetId: 'DRILL-001',
       workerId: 'worker-1',
+      dueAt: '2027-01-01T00:00:00Z',
       occurredAt: '2026-08-01T09:00:00Z',
       idempotencyKey: 'c-issue-logged',
       loggedBy: 'Priya Patel',
@@ -149,7 +150,7 @@ describe('MovementsService.correct', () => {
     // about who is holding what.
 
     it('refuses to move a return back before the issue it closes', async () => {
-      await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'ord-issue-1' });
+      await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', dueAt: '2027-01-01T00:00:00Z', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'ord-issue-1' });
       const ret = await service.return({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T17:00:00Z', idempotencyKey: 'ord-return-1' });
 
       await expect(
@@ -158,7 +159,7 @@ describe('MovementsService.correct', () => {
     });
 
     it('refuses to move an issue forward past the return that closed it', async () => {
-      const issue = await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'ord-issue-2' });
+      const issue = await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', dueAt: '2027-01-01T00:00:00Z', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'ord-issue-2' });
       await service.return({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T17:00:00Z', idempotencyKey: 'ord-return-2' });
 
       await expect(
@@ -167,7 +168,7 @@ describe('MovementsService.correct', () => {
     });
 
     it('refuses a correction that lands exactly on a neighbouring movement, rather than relying on a tiebreak', async () => {
-      await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'ord-issue-3' });
+      await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', dueAt: '2027-01-01T00:00:00Z', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'ord-issue-3' });
       const ret = await service.return({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T17:00:00Z', idempotencyKey: 'ord-return-3' });
 
       await expect(
@@ -176,7 +177,7 @@ describe('MovementsService.correct', () => {
     });
 
     it('refuses a correction dated into the future', async () => {
-      const issue = await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'ord-issue-4' });
+      const issue = await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', dueAt: '2027-01-01T00:00:00Z', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'ord-issue-4' });
       const tomorrow = new Date(Date.now() + 24 * 3600_000).toISOString();
 
       await expect(
@@ -185,7 +186,7 @@ describe('MovementsService.correct', () => {
     });
 
     it('refuses to move a damaged return past the out-of-service movement it triggered', async () => {
-      await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'ord-issue-5' });
+      await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', dueAt: '2027-01-01T00:00:00Z', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'ord-issue-5' });
       const ret = await service.return({
         assetId: 'DRILL-001',
         workerId: 'worker-1',
@@ -200,16 +201,16 @@ describe('MovementsService.correct', () => {
     });
 
     it('accepts a correction that stays between its neighbours', async () => {
-      await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'ord-issue-6' });
+      await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', dueAt: '2027-01-01T00:00:00Z', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'ord-issue-6' });
       const ret = await service.return({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T17:00:00Z', idempotencyKey: 'ord-return-6' });
-      await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-02T09:00:00Z', idempotencyKey: 'ord-issue-6b' });
+      await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', dueAt: '2027-01-01T00:00:00Z', occurredAt: '2026-08-02T09:00:00Z', idempotencyKey: 'ord-issue-6b' });
 
       const corrected = await service.correct(String(ret._id), { occurredAt: '2026-08-01T16:00:00Z', idempotencyKey: 'ord-correct-6' });
       expect(new Date(corrected.occurredAt).toISOString()).toBe('2026-08-01T16:00:00.000Z');
     });
 
     it('accepts moving the most recent movement backward, since it has no later neighbour', async () => {
-      await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'ord-issue-7' });
+      await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', dueAt: '2027-01-01T00:00:00Z', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'ord-issue-7' });
       const ret = await service.return({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T17:00:00Z', idempotencyKey: 'ord-return-7' });
 
       const corrected = await service.correct(String(ret._id), { occurredAt: '2026-08-01T09:30:00Z', idempotencyKey: 'ord-correct-7' });
@@ -218,15 +219,15 @@ describe('MovementsService.correct', () => {
 
     it('ignores movements on other assets when bounding a correction', async () => {
       await assetModel.create({ _id: 'DRILL-009', kind: 'drill', requiresCertification: null });
-      await service.issue({ assetId: 'DRILL-009', workerId: 'worker-1', occurredAt: '2026-08-01T10:00:00Z', idempotencyKey: 'ord-other-issue' });
-      const issue = await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'ord-issue-8' });
+      await service.issue({ assetId: 'DRILL-009', workerId: 'worker-1', dueAt: '2027-01-01T00:00:00Z', occurredAt: '2026-08-01T10:00:00Z', idempotencyKey: 'ord-other-issue' });
+      const issue = await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', dueAt: '2027-01-01T00:00:00Z', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'ord-issue-8' });
 
       const corrected = await service.correct(String(issue._id), { occurredAt: '2026-08-01T12:00:00Z', idempotencyKey: 'ord-correct-8' });
       expect(new Date(corrected.occurredAt).toISOString()).toBe('2026-08-01T12:00:00.000Z');
     });
 
     it('leaves the live asset state agreeing with a ledger replay after a refused correction', async () => {
-      await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'ord-issue-9' });
+      await service.issue({ assetId: 'DRILL-001', workerId: 'worker-1', dueAt: '2027-01-01T00:00:00Z', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'ord-issue-9' });
       const ret = await service.return({ assetId: 'DRILL-001', workerId: 'worker-1', occurredAt: '2026-08-01T17:00:00Z', idempotencyKey: 'ord-return-9' });
 
       await expect(

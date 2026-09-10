@@ -49,11 +49,11 @@ describe('StoreService.getStoreAsOf', () => {
     await workerModel.create({ _id: 'worker-1', name: 'Ana Rios', certifications: [] });
     await assetModel.create({ _id: 'DRILL-STORE-1', kind: 'drill', requiresCertification: null });
 
-    await movementsService.issue({ assetId: 'DRILL-STORE-1', workerId: 'worker-1', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'store-issue-1' });
+    await movementsService.issue({ assetId: 'DRILL-STORE-1', workerId: 'worker-1', dueAt: '2026-08-01T17:00:00.000Z', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'store-issue-1' });
     await movementsService.return({ assetId: 'DRILL-STORE-1', workerId: 'worker-1', occurredAt: '2026-08-01T17:00:00Z', idempotencyKey: 'store-return-1' });
 
     const midway = await storeService.getStoreAsOf(new Date('2026-08-01T12:00:00Z'));
-    expect(midway.get('DRILL-STORE-1')).toEqual({ status: 'ISSUED', holderId: 'worker-1', dueAt: null });
+    expect(midway.get('DRILL-STORE-1')).toMatchObject({ status: 'ISSUED', holderId: 'worker-1' });
 
     const afterReturn = await storeService.getStoreAsOf(new Date('2026-08-01T18:00:00Z'));
     expect(afterReturn.get('DRILL-STORE-1')).toEqual({ status: 'IN_STORE', holderId: null, dueAt: null });

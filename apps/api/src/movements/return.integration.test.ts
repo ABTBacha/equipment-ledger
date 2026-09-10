@@ -47,7 +47,7 @@ describe('MovementsService.return', () => {
 
   async function issueDrill(assetId: string, occurredAt: Date) {
     await assetModel.create({ _id: assetId, kind: 'drill', requiresCertification: null });
-    return service.issue({ assetId, workerId: 'worker-1', occurredAt: occurredAt.toISOString(), idempotencyKey: `issue-${assetId}` });
+    return service.issue({ assetId, workerId: 'worker-1', dueAt: new Date(new Date(occurredAt.toISOString()).getTime() + 8 * 3600_000).toISOString(), occurredAt: occurredAt.toISOString(), idempotencyKey: `issue-${assetId}` });
   }
 
   it('returns an issued asset and sets it back to IN_STORE', async () => {

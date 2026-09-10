@@ -11,6 +11,8 @@ export interface MovementResult {
   dueAt: Date | null;
   idempotencyKey: string;
   correctionOf: string | null;
+  /** The booking this issue collected, if any. */
+  reservationId: string | null;
   reason: string | null;
 }
 
@@ -29,6 +31,7 @@ export interface RawMovementDoc {
   dueAt: Date | null;
   idempotencyKey: string;
   correctionOf: Types.ObjectId | string | null;
+  reservationId?: Types.ObjectId | string | null;
   reason: string | null;
 }
 
@@ -43,6 +46,7 @@ export function toMovementResult(doc: RawMovementDoc): MovementResult {
     dueAt: doc.dueAt ?? null,
     idempotencyKey: doc.idempotencyKey,
     correctionOf: doc.correctionOf ? doc.correctionOf.toString() : null,
+    reservationId: doc.reservationId ? doc.reservationId.toString() : null,
     reason: doc.reason ?? null,
   };
 }

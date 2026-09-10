@@ -62,6 +62,7 @@ describe('AssetsService reads', () => {
     await service['movementsService'].issue({
       assetId: 'DRILL-003',
       workerId: 'worker-1',
+      dueAt: '2026-08-01T17:00:00.000Z',
       occurredAt: '2026-08-01T09:00:00Z',
       idempotencyKey: 'activity-issue-1',
     });
@@ -86,7 +87,7 @@ describe('AssetsService reads', () => {
 
   it('getHistory pairs a corrected movement with its correction', async () => {
     await assetModel.create({ _id: 'DRILL-002', kind: 'drill', requiresCertification: null });
-    const issued = await service['movementsService'].issue({ assetId: 'DRILL-002', workerId: 'worker-1', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'hist-issue-1' });
+    const issued = await service['movementsService'].issue({ assetId: 'DRILL-002', workerId: 'worker-1', dueAt: '2026-08-01T17:00:00.000Z', occurredAt: '2026-08-01T09:00:00Z', idempotencyKey: 'hist-issue-1' });
     await service['movementsService'].correct(String(issued._id), { occurredAt: '2026-08-01T09:05:00Z', idempotencyKey: 'hist-correct-1' });
 
     const history = await service.getHistory('DRILL-002');
@@ -138,15 +139,6 @@ describe('AssetsService reads', () => {
       expect(all.find((a) => a._id === 'DRILL-032')?.isOverdue).toBe(false);
     });
 
-    it('never marks an asset issued without a due-back time as overdue', async () => {
-      await assetModel.create({ _id: 'DRILL-033', kind: 'drill', requiresCertification: null });
-      await service['movementsService'].issue({ assetId: 'DRILL-033', workerId: 'worker-1', idempotencyKey: 'overdue-4' });
-
-      const all = await service.findAll();
-      const drill = all.find((a) => a._id === 'DRILL-033');
-      expect(drill?.isOverdue).toBe(false);
-      expect(drill?.dueAt).toBeNull();
-    });
 
     it('drops the due-back time and the overdue flag once the asset is returned late', async () => {
       await assetModel.create({ _id: 'DRILL-034', kind: 'drill', requiresCertification: null });
