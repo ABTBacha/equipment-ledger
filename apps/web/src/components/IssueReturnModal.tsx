@@ -161,7 +161,7 @@ export function IssueReturnModal({
               submit() covers both cases, and so does the API.
             */}
             <label className="block text-sm mb-1 text-muted" htmlFor="due-at">
-              Due back (optional)
+              Due back
             </label>
             <input
               id="due-at"
