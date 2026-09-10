@@ -75,3 +75,33 @@ describe('CreateReservationSchema', () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe('dueAt', () => {
+  it('accepts an issue carrying a due-back time', () => {
+    const result = IssueMovementSchema.safeParse({
+      assetId: 'HARN-014',
+      workerId: 'worker-ana-rios',
+      idempotencyKey: 'k1',
+      dueAt: '2026-09-11T17:00:00Z',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a due-back time that is not a timestamp', () => {
+    const result = IssueMovementSchema.safeParse({
+      assetId: 'HARN-014',
+      workerId: 'worker-ana-rios',
+      idempotencyKey: 'k1',
+      dueAt: 'tomorrow-ish',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('lets a correction carry dueAt on its own, since a mistyped due time is worth fixing', () => {
+    const result = CorrectMovementSchema.safeParse({
+      idempotencyKey: 'k1',
+      dueAt: '2026-09-11T17:00:00Z',
+    });
+    expect(result.success).toBe(true);
+  });
+});

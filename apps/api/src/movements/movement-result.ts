@@ -8,6 +8,7 @@ export interface MovementResult {
   type: MovementType;
   occurredAt: Date;
   recordedAt: Date;
+  dueAt: Date | null;
   idempotencyKey: string;
   correctionOf: string | null;
   reason: string | null;
@@ -25,6 +26,7 @@ export interface RawMovementDoc {
   type: MovementType;
   occurredAt: Date;
   recordedAt: Date;
+  dueAt: Date | null;
   idempotencyKey: string;
   correctionOf: Types.ObjectId | string | null;
   reason: string | null;
@@ -38,6 +40,7 @@ export function toMovementResult(doc: RawMovementDoc): MovementResult {
     type: doc.type,
     occurredAt: doc.occurredAt,
     recordedAt: doc.recordedAt,
+    dueAt: doc.dueAt ?? null,
     idempotencyKey: doc.idempotencyKey,
     correctionOf: doc.correctionOf ? doc.correctionOf.toString() : null,
     reason: doc.reason ?? null,

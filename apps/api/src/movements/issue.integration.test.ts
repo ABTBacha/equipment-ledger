@@ -135,4 +135,70 @@ describe('MovementsService.issue', () => {
     const updated = await reservationModel.findById(reservation._id).lean();
     expect(updated?.status).toBe(ReservationStatus.CANCELLED);
   });
+  describe('due-back time', () => {
+    it('records a keeper-supplied dueAt on the issue movement', async () => {
+      await assetModel.create({ _id: 'DRILL-020', kind: 'drill', requiresCertification: null });
+      const movement = await service.issue({
+        assetId: 'DRILL-020',
+        workerId: 'worker-1',
+        dueAt: '2026-08-01T17:00:00Z',
+        idempotencyKey: 'due-1',
+      });
+      expect(new Date(movement.dueAt!).toISOString()).toBe('2026-08-01T17:00:00.000Z');
+    });
+
+    it('leaves dueAt null when the keeper does not set one', async () => {
+      await assetModel.create({ _id: 'DRILL-021', kind: 'drill', requiresCertification: null });
+      const movement = await service.issue({ assetId: 'DRILL-021', workerId: 'worker-1', idempotencyKey: 'due-2' });
+      expect(movement.dueAt).toBeNull();
+    });
+
+    it('never puts a dueAt on a return', async () => {
+      await assetModel.create({ _id: 'DRILL-022', kind: 'drill', requiresCertification: null });
+      await service.issue({ assetId: 'DRILL-022', workerId: 'worker-1', dueAt: '2026-08-01T17:00:00Z', idempotencyKey: 'due-3' });
+      const ret = await service.return({ assetId: 'DRILL-022', workerId: 'worker-1', idempotencyKey: 'due-4' });
+      expect(ret.dueAt).toBeNull();
+    });
+
+    it('defaults dueAt to the window of the reservation being collected against', async () => {
+      await assetModel.create({ _id: 'DRILL-023', kind: 'drill', requiresCertification: null });
+      const reservation = await reservationModel.create({
+        assetId: 'DRILL-023',
+        workerId: 'worker-1',
+        startAt: new Date('2026-01-01T00:00:00Z'),
+        endAt: new Date('2026-01-01T01:00:00Z'),
+        status: ReservationStatus.ACTIVE,
+        idempotencyKey: 'reservation-due',
+      });
+
+      const movement = await service.issue({
+        assetId: 'DRILL-023',
+        workerId: 'worker-1',
+        idempotencyKey: 'due-5',
+        reservationId: reservation._id.toString(),
+      });
+      expect(new Date(movement.dueAt!).toISOString()).toBe('2026-01-01T01:00:00.000Z');
+    });
+
+    it('lets an explicit dueAt override the reservation window', async () => {
+      await assetModel.create({ _id: 'DRILL-024', kind: 'drill', requiresCertification: null });
+      const reservation = await reservationModel.create({
+        assetId: 'DRILL-024',
+        workerId: 'worker-1',
+        startAt: new Date('2026-01-01T00:00:00Z'),
+        endAt: new Date('2026-01-01T01:00:00Z'),
+        status: ReservationStatus.ACTIVE,
+        idempotencyKey: 'reservation-due-2',
+      });
+
+      const movement = await service.issue({
+        assetId: 'DRILL-024',
+        workerId: 'worker-1',
+        dueAt: '2026-01-05T09:00:00Z',
+        idempotencyKey: 'due-6',
+        reservationId: reservation._id.toString(),
+      });
+      expect(new Date(movement.dueAt!).toISOString()).toBe('2026-01-05T09:00:00.000Z');
+    });
+  });
 });

@@ -21,6 +21,14 @@ export class Movement {
   @Prop({ type: Date, required: true })
   recordedAt!: Date;
 
+  /**
+   * When the asset is due back. Only ever set on an ISSUE movement — a return has
+   * nothing to be due — and null when the keeper issued without naming a time, which
+   * is why overdue is a derived reading rather than a stored status.
+   */
+  @Prop({ type: Date, default: null })
+  dueAt!: Date | null;
+
   @Prop({ type: String, required: true, unique: true })
   idempotencyKey!: string;
 

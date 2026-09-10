@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Movement } from '../schemas/movement.schema';
-import { AssetReplayState, RawMovement, replayStoreState, resolveEffectiveMovements } from '../domain/replay';
+import { AssetReplayState, replayStoreState, resolveEffectiveMovements, toRawMovement } from '../domain/replay';
 
 @Injectable()
 export class StoreService {
@@ -10,17 +10,19 @@ export class StoreService {
 
   async getStoreAsOf(asOf: Date): Promise<Map<string, AssetReplayState>> {
     const docs = await this.movementModel.find({}).lean();
-    const raw: RawMovement[] = docs.map((m) => ({
-      id: String(m._id),
-      assetId: m.assetId,
-      workerId: m.workerId,
-      type: m.type,
-      occurredAt: m.occurredAt,
-      recordedAt: m.recordedAt,
-      correctionOf: m.correctionOf ? String(m.correctionOf) : null,
-      correctedBy: m.correctedBy ? String(m.correctedBy) : null,
-    }));
+    const raw = docs.map(toRawMovement);
     const effective = resolveEffectiveMovements(raw);
     return replayStoreState(effective, asOf);
+  }
+
+  /**
+   * Overdue is relative to the instant being asked about, not to now: "was the gas
+   * detector overdue at 14:20 last Tuesday" has to compare its due-back time against
+   * 14:20 last Tuesday. Same reason the dashboard compares against the present — one
+   * rule, two instants — which is why it lives next to the replay rather than in a
+   * screen.
+   */
+  isOverdueAsOf(state: AssetReplayState, asOf: Date): boolean {
+    return state.status === 'ISSUED' && state.dueAt !== null && state.dueAt.getTime() < asOf.getTime();
   }
 }

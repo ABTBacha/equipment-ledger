@@ -6,7 +6,7 @@ import { MovementsService } from './movements.service';
 import { Asset, AssetSchema } from '../schemas/asset.schema';
 import { Worker, WorkerSchema } from '../schemas/worker.schema';
 import { Movement, MovementSchema } from '../schemas/movement.schema';
-import { replayStoreState, resolveEffectiveMovements } from '../domain/replay';
+import { replayStoreState, resolveEffectiveMovements, toRawMovement } from '../domain/replay';
 
 describe('MovementsService.correct', () => {
   let service: MovementsService;
@@ -236,24 +236,53 @@ describe('MovementsService.correct', () => {
       const live = await assetModel.findById('DRILL-001').lean();
       const docs = await movementModel.find({}).lean();
       const replayed = replayStoreState(
-        resolveEffectiveMovements(
-          docs.map((m: any) => ({
-            id: String(m._id),
-            assetId: m.assetId,
-            workerId: m.workerId,
-            type: m.type,
-            occurredAt: m.occurredAt,
-            recordedAt: m.recordedAt,
-            correctionOf: m.correctionOf ? String(m.correctionOf) : null,
-            correctedBy: m.correctedBy ? String(m.correctedBy) : null,
-          })),
-        ),
+        resolveEffectiveMovements(docs.map(toRawMovement)),
         new Date(),
       );
 
       expect(live!.status).toBe('IN_STORE');
       expect(replayed.get('DRILL-001')?.status ?? 'IN_STORE').toBe('IN_STORE');
       expect(replayed.get('DRILL-001')?.holderId ?? null).toBeNull();
+    });
+  });
+
+  describe('due-back corrections', () => {
+    it('carries a corrected dueAt without touching the original', async () => {
+      const issue = await service.issue({
+        assetId: 'DRILL-001',
+        workerId: 'worker-1',
+        occurredAt: '2026-08-01T09:00:00Z',
+        dueAt: '2026-08-01T12:00:00Z',
+        idempotencyKey: 'due-corr-issue',
+      });
+
+      const correction = await service.correct(String(issue._id), {
+        dueAt: '2026-08-01T17:00:00Z',
+        reason: 'Agreed a later drop-off',
+        idempotencyKey: 'due-corr-1',
+      });
+
+      expect(new Date(correction.dueAt!).toISOString()).toBe('2026-08-01T17:00:00.000Z');
+      expect(new Date(correction.occurredAt).toISOString()).toBe('2026-08-01T09:00:00.000Z');
+      const original = await movementModel.findById(issue._id).lean();
+      expect(new Date(original!.dueAt!).toISOString()).toBe('2026-08-01T12:00:00.000Z');
+    });
+
+    it('keeps the original dueAt when a correction only changes the time it happened', async () => {
+      const issue = await service.issue({
+        assetId: 'DRILL-001',
+        workerId: 'worker-1',
+        occurredAt: '2026-08-01T09:00:00Z',
+        dueAt: '2026-08-01T12:00:00Z',
+        idempotencyKey: 'due-corr-issue-2',
+      });
+
+      const correction = await service.correct(String(issue._id), {
+        occurredAt: '2026-08-01T09:30:00Z',
+        idempotencyKey: 'due-corr-2',
+      });
+
+      expect(new Date(correction.dueAt!).toISOString()).toBe('2026-08-01T12:00:00.000Z');
     });
   });
 });

@@ -20,6 +20,14 @@ export class StoreController {
     const { asOf } = AsOfQuerySchema.parse(query);
     const asOfDate = asOf ? new Date(asOf) : new Date();
     const state = await this.storeService.getStoreAsOf(asOfDate);
-    return { asOf: asOfDate.toISOString(), assets: Object.fromEntries(state.entries()) };
+    // isOverdue is folded in here rather than left to the client, so a screen showing a
+    // past instant and the dashboard showing now apply the same rule to the same field.
+    const assets = Object.fromEntries(
+      [...state.entries()].map(([assetId, assetState]) => [
+        assetId,
+        { ...assetState, isOverdue: this.storeService.isOverdueAsOf(assetState, asOfDate) },
+      ]),
+    );
+    return { asOf: asOfDate.toISOString(), assets };
   }
 }

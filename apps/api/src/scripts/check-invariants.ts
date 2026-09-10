@@ -3,7 +3,7 @@ import { Asset, AssetSchema } from '../schemas/asset.schema';
 import { Worker, WorkerSchema } from '../schemas/worker.schema';
 import { Movement, MovementSchema } from '../schemas/movement.schema';
 import { Reservation, ReservationSchema } from '../schemas/reservation.schema';
-import { RawMovement, replayStoreState, resolveEffectiveMovements } from '../domain/replay';
+import { replayStoreState, resolveEffectiveMovements, toRawMovement } from '../domain/replay';
 import { intervalsOverlap } from '../domain/intervals';
 
 export interface InvariantViolation {
@@ -22,16 +22,7 @@ export async function checkInvariants(uri: string): Promise<InvariantViolation[]
   try {
     const assets = await AssetModel.find({}).lean();
     const movementDocs = await MovementModel.find({}).lean();
-    const raw: RawMovement[] = movementDocs.map((m) => ({
-      id: String(m._id),
-      assetId: m.assetId,
-      workerId: m.workerId,
-      type: m.type,
-      occurredAt: m.occurredAt,
-      recordedAt: m.recordedAt,
-      correctionOf: m.correctionOf ? String(m.correctionOf) : null,
-      correctedBy: m.correctedBy ? String(m.correctedBy) : null,
-    }));
+    const raw = movementDocs.map(toRawMovement);
     const effective = resolveEffectiveMovements(raw);
     const replayed = replayStoreState(effective, new Date());
 
@@ -124,6 +115,18 @@ export async function checkInvariants(uri: string): Promise<InvariantViolation[]
         } else if (String(correction.correctionOf) !== String(m._id)) {
           violations.push({ rule: 'correction-integrity', detail: `Movement ${m._id} has correctedBy=${key}, but that movement's correctionOf does not point back to ${m._id}` });
         }
+      }
+    }
+
+    // Rule 5: a due-back time only ever belongs on an ISSUE. A return or an
+    // out-of-service movement has nothing to be due, and a dueAt sitting on one would
+    // mean the overdue reading came from somewhere the model does not define.
+    for (const m of movementDocs) {
+      if (m.dueAt && m.type !== 'ISSUE') {
+        violations.push({
+          rule: 'due-only-on-issue',
+          detail: `Movement ${m._id} is a ${m.type} but carries dueAt ${m.dueAt.toISOString()}`,
+        });
       }
     }
 

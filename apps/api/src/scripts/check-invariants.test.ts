@@ -151,4 +151,31 @@ describe('checkInvariants', () => {
     const violations = await checkInvariants(process.env.MONGO_URI!);
     expect(violations.some((v) => v.rule === 'correction-integrity')).toBe(true);
   });
+
+  it('reports a violation when a due-back time is stored on something other than an issue', async () => {
+    await AssetModel.deleteMany({});
+    await MovementModel.deleteMany({});
+    await ReservationModel.deleteMany({});
+    await AssetModel.create({ _id: 'DUE-1', kind: 'drill', requiresCertification: null, status: 'IN_STORE', currentHolderId: null });
+    await MovementModel.create({
+      assetId: 'DUE-1',
+      workerId: 'worker-1',
+      type: 'ISSUE',
+      occurredAt: new Date('2026-08-01T09:00:00Z'),
+      recordedAt: new Date('2026-08-01T09:00:00Z'),
+      idempotencyKey: 'inv-due-1',
+    });
+    await MovementModel.create({
+      assetId: 'DUE-1',
+      workerId: 'worker-1',
+      type: 'RETURN',
+      occurredAt: new Date('2026-08-01T17:00:00Z'),
+      recordedAt: new Date('2026-08-01T17:00:00Z'),
+      dueAt: new Date('2026-08-02T09:00:00Z'),
+      idempotencyKey: 'inv-due-2',
+    });
+
+    const violations = await checkInvariants(process.env.MONGO_URI!);
+    expect(violations.some((v) => v.rule === 'due-only-on-issue')).toBe(true);
+  });
 });

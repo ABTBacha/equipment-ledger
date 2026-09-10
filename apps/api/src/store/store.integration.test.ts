@@ -53,14 +53,32 @@ describe('StoreService.getStoreAsOf', () => {
     await movementsService.return({ assetId: 'DRILL-STORE-1', workerId: 'worker-1', occurredAt: '2026-08-01T17:00:00Z', idempotencyKey: 'store-return-1' });
 
     const midway = await storeService.getStoreAsOf(new Date('2026-08-01T12:00:00Z'));
-    expect(midway.get('DRILL-STORE-1')).toEqual({ status: 'ISSUED', holderId: 'worker-1' });
+    expect(midway.get('DRILL-STORE-1')).toEqual({ status: 'ISSUED', holderId: 'worker-1', dueAt: null });
 
     const afterReturn = await storeService.getStoreAsOf(new Date('2026-08-01T18:00:00Z'));
-    expect(afterReturn.get('DRILL-STORE-1')).toEqual({ status: 'IN_STORE', holderId: null });
+    expect(afterReturn.get('DRILL-STORE-1')).toEqual({ status: 'IN_STORE', holderId: null, dueAt: null });
 
     const asOfNow = await storeService.getStoreAsOf(new Date());
     const liveAsset = await assetModel.findById('DRILL-STORE-1').lean();
     expect(asOfNow.get('DRILL-STORE-1')?.status).toBe(liveAsset?.status);
     expect(asOfNow.get('DRILL-STORE-1')?.holderId).toBe(liveAsset?.currentHolderId);
+  });
+
+  it('answers whether an asset was overdue as of the instant asked about, not as of now', async () => {
+    await assetModel.create({ _id: 'DRILL-STORE-9', kind: 'drill', requiresCertification: null });
+    await movementsService.issue({
+      assetId: 'DRILL-STORE-9',
+      workerId: 'worker-1',
+      occurredAt: '2026-08-01T09:00:00Z',
+      dueAt: '2026-08-01T12:00:00Z',
+      idempotencyKey: 'store-overdue-1',
+    });
+
+    const beforeDue = await storeService.getStoreAsOf(new Date('2026-08-01T11:00:00Z'));
+    const afterDue = await storeService.getStoreAsOf(new Date('2026-08-01T13:00:00Z'));
+
+    expect(beforeDue.get('DRILL-STORE-9')?.dueAt).toEqual(new Date('2026-08-01T12:00:00Z'));
+    expect(storeService.isOverdueAsOf(beforeDue.get('DRILL-STORE-9')!, new Date('2026-08-01T11:00:00Z'))).toBe(false);
+    expect(storeService.isOverdueAsOf(afterDue.get('DRILL-STORE-9')!, new Date('2026-08-01T13:00:00Z'))).toBe(true);
   });
 });

@@ -70,6 +70,7 @@ interface SeedMovement {
   workerId: string | null;
   type: string;
   occurredAt: Date;
+  dueAt: Date | null;
   recordedAt: Date;
   idempotencyKey: string;
   correctionOf: Types.ObjectId | null;
@@ -119,6 +120,7 @@ function buildMovementsAndPatches(
         type: 'OUT_OF_SERVICE',
         occurredAt,
         recordedAt: occurredAt,
+        dueAt: null,
         idempotencyKey: `seed-oos-${asset._id}`,
         correctionOf: null,
         correctedBy: null,
@@ -131,6 +133,7 @@ function buildMovementsAndPatches(
     if (asset._id === overdueAssetId) {
       const worker = pickWorker(asset.requiresCertification);
       const occurredAt = new Date(now.getTime() - 10 * DAY_MS);
+      const overdueDueAt = new Date(now.getTime() - 3 * DAY_MS);
       const id = new Types.ObjectId();
       movements.push({
         _id: id,
@@ -139,6 +142,7 @@ function buildMovementsAndPatches(
         type: 'ISSUE',
         occurredAt,
         recordedAt: occurredAt,
+        dueAt: overdueDueAt,
         idempotencyKey: `seed-issue-overdue-${asset._id}`,
         correctionOf: null,
         correctedBy: null,
@@ -158,6 +162,7 @@ function buildMovementsAndPatches(
         type: 'ISSUE',
         occurredAt: issueOccurredAt,
         recordedAt: issueOccurredAt,
+        dueAt: null,
         idempotencyKey: `seed-issue-late-${asset._id}`,
         correctionOf: null,
         correctedBy: null,
@@ -172,6 +177,7 @@ function buildMovementsAndPatches(
         type: 'RETURN',
         occurredAt: returnOccurredAt,
         recordedAt: returnRecordedAt,
+        dueAt: null,
         idempotencyKey: `seed-return-late-${asset._id}`,
         correctionOf: null,
         correctedBy: null,
@@ -191,6 +197,7 @@ function buildMovementsAndPatches(
         type: 'ISSUE',
         occurredAt: issueOccurredAt,
         recordedAt: issueOccurredAt,
+        dueAt: null,
         idempotencyKey: `seed-issue-corrected-${asset._id}`,
         correctionOf: null,
         correctedBy: null,
@@ -206,6 +213,7 @@ function buildMovementsAndPatches(
         type: 'RETURN',
         occurredAt: wrongReturnOccurredAt,
         recordedAt: wrongReturnOccurredAt,
+        dueAt: null,
         idempotencyKey: `seed-return-corrected-${asset._id}`,
         correctionOf: null,
         correctedBy: correctionId,
@@ -218,6 +226,7 @@ function buildMovementsAndPatches(
         type: 'RETURN',
         occurredAt: new Date(wrongReturnOccurredAt.getTime() + 60 * 60 * 1000),
         recordedAt: new Date(now.getTime() - 1 * DAY_MS),
+        dueAt: null,
         idempotencyKey: `seed-correction-${asset._id}`,
         correctionOf: wrongReturnId,
         correctedBy: null,
@@ -246,6 +255,7 @@ function buildMovementsAndPatches(
         type: 'ISSUE',
         occurredAt: issueOccurredAt,
         recordedAt: issueOccurredAt,
+        dueAt: null,
         idempotencyKey: `seed-issue-${asset._id}-${p}`,
         correctionOf: null,
         correctedBy: null,
@@ -256,6 +266,11 @@ function buildMovementsAndPatches(
       const returnOccurredAt = new Date(issueOccurredAt.getTime() + (2 + rng() * 6) * 60 * 60 * 1000);
 
       if ((isLastPair && leaveOutstanding) || returnOccurredAt.getTime() >= now.getTime()) {
+        // Still out: give it a due-back time in the near future, so seeded outstanding
+        // items read as on loan rather than overdue — the overdue asset above is the one
+        // deliberately past its time.
+        const openIssue = movements.find((m) => String(m._id) === String(issueId));
+        if (openIssue) openIssue.dueAt = new Date(now.getTime() + (1 + rng() * 3) * DAY_MS);
         patches.set(asset._id, { status: 'ISSUED', currentHolderId: worker._id, currentMovementId: String(issueId) });
         settled = true;
         break;
@@ -268,6 +283,7 @@ function buildMovementsAndPatches(
         type: 'RETURN',
         occurredAt: returnOccurredAt,
         recordedAt: returnOccurredAt,
+        dueAt: null,
         idempotencyKey: `seed-return-${asset._id}-${p}`,
         correctionOf: null,
         correctedBy: null,

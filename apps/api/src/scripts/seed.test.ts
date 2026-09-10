@@ -72,4 +72,32 @@ describe('seed', () => {
     const violations = await checkInvariants(process.env.MONGO_URI!);
     expect(violations).toHaveLength(0);
   });
+
+  it('seeds at least one asset that is genuinely overdue, and outstanding ones that are not', async () => {
+    const fixedNow = new Date('2026-09-08T12:00:00Z');
+    await seed(process.env.MONGO_URI!, fixedNow);
+
+    const openIssues = await MovementModel.find({ type: 'ISSUE', dueAt: { $ne: null } }).lean();
+    const assets = await AssetModel.find({}).lean();
+    const openByMovementId = new Map(
+      assets
+        .filter((a) => a.currentMovementId !== null)
+        .map((a) => [a.currentMovementId as string, a]),
+    );
+
+    const outAndDue = openIssues.filter((m) => openByMovementId.has(String(m._id)));
+    const overdue = outAndDue.filter((m) => m.dueAt!.getTime() < fixedNow.getTime());
+    const notYetDue = outAndDue.filter((m) => m.dueAt!.getTime() >= fixedNow.getTime());
+
+    expect(overdue.length).toBeGreaterThanOrEqual(1);
+    expect(notYetDue.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('never puts a due-back time on anything but an issue', async () => {
+    const fixedNow = new Date('2026-09-08T12:00:00Z');
+    await seed(process.env.MONGO_URI!, fixedNow);
+
+    const misplaced = await MovementModel.find({ type: { $ne: 'ISSUE' }, dueAt: { $ne: null } }).lean();
+    expect(misplaced).toHaveLength(0);
+  });
 });

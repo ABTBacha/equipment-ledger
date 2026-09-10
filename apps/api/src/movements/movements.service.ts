@@ -10,7 +10,7 @@ import { AssetLock } from '../schemas/asset-lock.schema';
 import { checkCertification } from '../domain/certification';
 import { withIdempotency, replayOrThrow } from '../domain/idempotency';
 import { withRetries } from '../domain/retry';
-import { resolveEffectiveMovements } from '../domain/replay';
+import { resolveEffectiveMovements, toRawMovement } from '../domain/replay';
 import { MovementResult, RawMovementDoc, toMovementResult } from './movement-result';
 
 @Injectable()
@@ -75,6 +75,18 @@ export class MovementsService {
           throw new ConflictException(`Asset ${dto.assetId} is not available to issue`);
         }
 
+        // Fulfilled before the movement is written, because a reservation the worker is
+        // collecting against already states when the asset is due back: the keeper should
+        // not have to retype it. An explicit dueAt on the request still wins.
+        const fulfilledReservation = dto.reservationId
+          ? await this.reservationModel.findOneAndUpdate(
+              { _id: dto.reservationId, status: ReservationStatus.ACTIVE },
+              { $set: { status: ReservationStatus.FULFILLED } },
+              { session, new: true },
+            )
+          : null;
+        const dueAt = dto.dueAt ? new Date(dto.dueAt) : fulfilledReservation?.endAt ?? null;
+
         const [movement] = await this.movementModel.create(
           [
             {
@@ -84,6 +96,7 @@ export class MovementsService {
               type: MovementType.ISSUE,
               occurredAt,
               recordedAt: new Date(),
+              dueAt,
               idempotencyKey: dto.idempotencyKey,
               correctionOf: null,
               correctedBy: null,
@@ -93,14 +106,6 @@ export class MovementsService {
           ],
           { session },
         );
-
-        if (dto.reservationId) {
-          await this.reservationModel.findOneAndUpdate(
-            { _id: dto.reservationId, status: ReservationStatus.ACTIVE },
-            { $set: { status: ReservationStatus.FULFILLED } },
-            { session },
-          );
-        }
 
         return movement;
       });
@@ -311,6 +316,7 @@ export class MovementsService {
               type: original.type,
               occurredAt: dto.occurredAt ? new Date(dto.occurredAt) : original.occurredAt,
               recordedAt: new Date(),
+              dueAt: dto.dueAt ? new Date(dto.dueAt) : original.dueAt ?? null,
               idempotencyKey: dto.idempotencyKey,
               correctionOf: original._id,
               correctedBy: null,
@@ -361,16 +367,7 @@ export class MovementsService {
 
     const siblings = await this.movementModel.find({ assetId: original.assetId }, null, { session }).lean();
     const effective = resolveEffectiveMovements(
-      siblings.map((m) => ({
-        id: String(m._id),
-        assetId: m.assetId,
-        workerId: m.workerId,
-        type: m.type,
-        occurredAt: m.occurredAt,
-        recordedAt: m.recordedAt,
-        correctionOf: m.correctionOf ? String(m.correctionOf) : null,
-        correctedBy: m.correctedBy ? String(m.correctedBy) : null,
-      })),
+      siblings.map(toRawMovement),
     ).filter((m) => m.id !== String(original._id));
 
     const currentTime = original.occurredAt.getTime();

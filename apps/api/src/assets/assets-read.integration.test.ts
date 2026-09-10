@@ -94,4 +94,72 @@ describe('AssetsService reads', () => {
     expect(String(history[0].movement._id)).toBe(String(issued._id));
     expect(history[0].correction).not.toBeNull();
   });
+
+  describe('overdue', () => {
+    it('reports the due-back time of the issue an asset is out on', async () => {
+      await assetModel.create({ _id: 'DRILL-030', kind: 'drill', requiresCertification: null });
+      await service['movementsService'].issue({
+        assetId: 'DRILL-030',
+        workerId: 'worker-1',
+        dueAt: '2026-08-02T17:00:00Z',
+        idempotencyKey: 'overdue-1',
+      });
+
+      const all = await service.findAll();
+      const drill = all.find((a) => a._id === 'DRILL-030');
+      expect(new Date(drill!.dueAt!).toISOString()).toBe('2026-08-02T17:00:00.000Z');
+    });
+
+    it('marks an asset overdue once its due-back time has passed', async () => {
+      await assetModel.create({ _id: 'DRILL-031', kind: 'drill', requiresCertification: null });
+      await service['movementsService'].issue({
+        assetId: 'DRILL-031',
+        workerId: 'worker-1',
+        dueAt: new Date(Date.now() - 3600_000).toISOString(),
+        idempotencyKey: 'overdue-2',
+      });
+
+      const all = await service.findAll();
+      expect(all.find((a) => a._id === 'DRILL-031')?.isOverdue).toBe(true);
+    });
+
+    it('does not mark an asset overdue while its due-back time is still ahead', async () => {
+      await assetModel.create({ _id: 'DRILL-032', kind: 'drill', requiresCertification: null });
+      await service['movementsService'].issue({
+        assetId: 'DRILL-032',
+        workerId: 'worker-1',
+        dueAt: new Date(Date.now() + 3600_000).toISOString(),
+        idempotencyKey: 'overdue-3',
+      });
+
+      const all = await service.findAll();
+      expect(all.find((a) => a._id === 'DRILL-032')?.isOverdue).toBe(false);
+    });
+
+    it('never marks an asset issued without a due-back time as overdue', async () => {
+      await assetModel.create({ _id: 'DRILL-033', kind: 'drill', requiresCertification: null });
+      await service['movementsService'].issue({ assetId: 'DRILL-033', workerId: 'worker-1', idempotencyKey: 'overdue-4' });
+
+      const all = await service.findAll();
+      const drill = all.find((a) => a._id === 'DRILL-033');
+      expect(drill?.isOverdue).toBe(false);
+      expect(drill?.dueAt).toBeNull();
+    });
+
+    it('drops the due-back time and the overdue flag once the asset is returned late', async () => {
+      await assetModel.create({ _id: 'DRILL-034', kind: 'drill', requiresCertification: null });
+      await service['movementsService'].issue({
+        assetId: 'DRILL-034',
+        workerId: 'worker-1',
+        dueAt: new Date(Date.now() - 3600_000).toISOString(),
+        idempotencyKey: 'overdue-5',
+      });
+      await service['movementsService'].return({ assetId: 'DRILL-034', workerId: 'worker-1', idempotencyKey: 'overdue-6' });
+
+      const all = await service.findAll();
+      const drill = all.find((a) => a._id === 'DRILL-034');
+      expect(drill?.isOverdue).toBe(false);
+      expect(drill?.dueAt).toBeNull();
+    });
+  });
 });

@@ -19,6 +19,15 @@ export interface AssetSummary {
   currentHolderId: string | null;
   upcomingReservation: { startAt: Date; endAt: Date; workerId: string } | null;
   lastActivityAt: Date | null;
+  /** When the current holder is due to bring it back, from the issue it is out on; null otherwise. */
+  dueAt: Date | null;
+  /**
+   * Derived, never stored: an asset is overdue when it is out on an issue whose dueAt has
+   * passed. Deliberately not an AssetStatus value — "one holder, ever" is enforced by
+   * compare-and-swapping status between IN_STORE and ISSUED, and a third status an asset
+   * could drift into on its own would stop a return from matching that filter.
+   */
+  isOverdue: boolean;
 }
 
 export interface HistoryEntry {
@@ -228,8 +237,17 @@ export class AssetsService {
 
     const lastActivityByAsset = await this.getLastActivityByAsset();
 
+    // One query for every open issue, rather than one per asset: an asset that is out
+    // points at the movement that put it out, and that movement carries the due-back time.
+    const openMovementIds = assets.map((a) => a.currentMovementId).filter((id): id is string => id !== null);
+    const openMovements = openMovementIds.length
+      ? await this.movementModel.find({ _id: { $in: openMovementIds } }, { dueAt: 1 }).lean()
+      : [];
+    const dueAtByMovementId = new Map(openMovements.map((m) => [String(m._id), m.dueAt ?? null]));
+
     return assets.map((a) => {
       const nearest = nearestByAsset.get(a._id);
+      const dueAt = a.currentMovementId ? dueAtByMovementId.get(a.currentMovementId) ?? null : null;
       return {
         _id: a._id,
         kind: a.kind,
@@ -238,6 +256,8 @@ export class AssetsService {
         currentHolderId: a.currentHolderId,
         upcomingReservation: nearest ? { startAt: nearest.startAt, endAt: nearest.endAt, workerId: nearest.workerId } : null,
         lastActivityAt: lastActivityByAsset.get(a._id) ?? null,
+        dueAt,
+        isOverdue: dueAt !== null && dueAt.getTime() < now.getTime(),
       };
     });
   }
