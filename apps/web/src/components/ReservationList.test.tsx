@@ -17,6 +17,7 @@ function reservation(overrides: Partial<ReservationView> = {}): ReservationView 
     endAt: '2027-01-10T17:00:00.000Z',
     status: 'ACTIVE',
     cancelReason: null,
+    fulfilledByMovementId: null,
     ...overrides,
   };
 }
@@ -32,7 +33,7 @@ describe('ReservationList', () => {
     expect(screen.getByRole('button', { name: 'Cancel reservation' })).toBeInTheDocument();
   });
 
-  it.each(['CANCELLED', 'EXPIRED', 'FULFILLED'] as const)(
+  it.each(['CANCELLED', 'NOT_COLLECTED', 'FULFILLED', 'OVERDUE'] as const)(
     'does not offer to cancel a %s reservation',
     (status) => {
       render(<ReservationList reservations={[reservation({ status })]} onChanged={jest.fn()} />);

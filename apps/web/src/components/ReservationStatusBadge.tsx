@@ -5,14 +5,16 @@ import { RESERVATION_STATUS_LABEL, ReservationStatus } from '../lib/types';
  * way wherever it appears. Colour carries meaning only alongside the label, never alone.
  *
  * ACTIVE is blue rather than green: it is a claim on the future, not a settled good state.
- * FULFILLED is the green one — the booking did what it was for. EXPIRED is amber (nobody
- * collected) and CANCELLED red (called off deliberately).
+ * FULFILLED is the green one — the booking did what it was for. NOT_COLLECTED is amber
+ * (nobody came), OVERDUE red (nothing came back), and CANCELLED muted, because a booking
+ * called off on purpose is not a problem to look at.
  */
 const STATUS_COLOR: Record<ReservationStatus, string> = {
   ACTIVE: 'var(--accent-blue)',
   FULFILLED: 'var(--accent-green)',
-  EXPIRED: 'var(--accent-amber)',
-  CANCELLED: 'var(--accent-red)',
+  NOT_COLLECTED: 'var(--accent-amber)',
+  OVERDUE: 'var(--accent-red)',
+  CANCELLED: 'var(--text-muted)',
 };
 
 export function ReservationStatusBadge({ status }: { status: ReservationStatus }) {

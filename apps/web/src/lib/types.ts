@@ -36,7 +36,7 @@ export interface WorkerSummaryView {
   currentlyHolding: import('../components/StoreGrid').AssetSummary[];
 }
 
-export type ReservationStatus = 'ACTIVE' | 'CANCELLED' | 'FULFILLED' | 'EXPIRED';
+export type ReservationStatus = 'ACTIVE' | 'CANCELLED' | 'FULFILLED' | 'NOT_COLLECTED' | 'OVERDUE';
 
 export interface ReservationView {
   _id: string;
@@ -46,13 +46,15 @@ export interface ReservationView {
   endAt: string;
   status: ReservationStatus;
   cancelReason: string | null;
+  fulfilledByMovementId: string | null;
 }
 
 export const RESERVATION_STATUS_LABEL: Record<ReservationStatus, string> = {
   ACTIVE: 'Active',
   CANCELLED: 'Cancelled',
   FULFILLED: 'Fulfilled',
-  EXPIRED: 'Expired',
+  NOT_COLLECTED: 'Not collected',
+  OVERDUE: 'Overdue',
 };
 
 export interface WorkerDetailView extends WorkerSummaryView {

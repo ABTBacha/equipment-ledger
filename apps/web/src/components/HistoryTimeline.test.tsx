@@ -10,6 +10,7 @@ const baseMovement = {
   type: 'RETURN' as const,
   occurredAt: '2026-08-01T09:00:00.000Z',
   recordedAt: '2026-08-01T09:00:00.000Z',
+  dueAt: null,
   reason: null,
 };
 

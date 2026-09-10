@@ -7,6 +7,8 @@ import { apiFetch } from '../lib/api';
 jest.mock('../lib/api', () => ({
   apiFetch: jest.fn(),
   newIdempotencyKey: jest.requireActual('../lib/api').newIdempotencyKey,
+  // The real class, because the modal narrows on it to localise a structured refusal.
+  ApiError: jest.requireActual('../lib/api').ApiError,
   getCurrentKeeper: jest.fn(() => null),
 }));
 
@@ -18,6 +20,8 @@ const asset = {
   currentHolderId: null,
   upcomingReservation: null,
   lastActivityAt: null,
+  dueAt: null,
+  isOverdue: false,
 };
 
 const WORKERS = [
@@ -27,7 +31,7 @@ const WORKERS = [
 ];
 
 /**
- * The mocked apiFetch serves the `GET /workers` call the modal makes on mount from a fixed
+ * The mocked apiFetch serves the `GET /workers` and `GET /reservations` calls the modal makes on mount
  * worker list, and queues separate resolutions/rejections (in order) for every other call
  * (the movement submit), independent of when the workers fetch happens to land.
  */
@@ -35,7 +39,10 @@ function mockApiFetch() {
   const submitQueue: Array<() => Promise<unknown>> = [];
   (apiFetch as jest.Mock).mockReset();
   (apiFetch as jest.Mock).mockImplementation((path: string) => {
+    // The modal reads two lists on open. Only the movement submit draws from the queue —
+    // otherwise a read would consume the response queued for the write it is testing.
     if (path === '/workers') return Promise.resolve(WORKERS);
+    if (path === '/reservations') return Promise.resolve([]);
     const next = submitQueue.shift();
     return next ? next() : Promise.resolve({});
   });
@@ -201,5 +208,84 @@ describe('IssueReturnModal due-back time', () => {
 
     fireEvent.change(screen.getByLabelText(/occurred at/i), { target: { value: '2026-08-01T09:00' } });
     expect(screen.getByLabelText(/due back/i)).toHaveAttribute('min', '2026-08-01T09:00');
+  });
+});
+
+describe('IssueReturnModal reservations', () => {
+  const hours = (n: number) => n * 60 * 60 * 1000;
+
+  function mockWithReservations(reservations: unknown[]) {
+    (apiFetch as jest.Mock).mockReset();
+    (apiFetch as jest.Mock).mockImplementation((path: string) => {
+      if (path === '/workers') return Promise.resolve(WORKERS);
+      if (path === '/reservations') return Promise.resolve(reservations);
+      return Promise.resolve({});
+    });
+  }
+
+  it('pins the due-back time to the booking when the chosen worker has one, and locks it', async () => {
+    const endAt = new Date(Date.now() + hours(4));
+    mockWithReservations([
+      {
+        _id: 'res-1',
+        assetId: 'DRILL-001',
+        workerId: 'worker-1',
+        startAt: new Date(Date.now() - hours(1)).toISOString(),
+        endAt: endAt.toISOString(),
+        status: 'ACTIVE',
+        cancelReason: null,
+        fulfilledByMovementId: null,
+      },
+    ]);
+
+    render(
+      <ToastProvider>
+        <IssueReturnModal asset={asset} action="issue" onClose={() => {}} />
+      </ToastProvider>,
+    );
+    await selectWorker('Worker One (worker-1)');
+
+    const due = await screen.findByLabelText(/due back/i);
+    await waitFor(() => expect((due as HTMLInputElement).readOnly).toBe(true));
+    expect(screen.getByText(/collecting a reservation/i)).toBeInTheDocument();
+  });
+
+  it('warns before submitting when somebody else holds the window', async () => {
+    const startAt = new Date(Date.now() + hours(1));
+    mockWithReservations([
+      {
+        _id: 'res-2',
+        assetId: 'DRILL-001',
+        workerId: 'worker-2',
+        startAt: startAt.toISOString(),
+        endAt: new Date(startAt.getTime() + hours(4)).toISOString(),
+        status: 'ACTIVE',
+        cancelReason: null,
+        fulfilledByMovementId: null,
+      },
+    ]);
+
+    render(
+      <ToastProvider>
+        <IssueReturnModal asset={asset} action="issue" onClose={() => {}} />
+      </ToastProvider>,
+    );
+    await selectWorker('Worker One (worker-1)');
+
+    expect(await screen.findByText(/reserved for worker-2/i)).toBeInTheDocument();
+  });
+
+  it('leaves the due-back field free when no booking touches the asset', async () => {
+    mockWithReservations([]);
+
+    render(
+      <ToastProvider>
+        <IssueReturnModal asset={asset} action="issue" onClose={() => {}} />
+      </ToastProvider>,
+    );
+    await selectWorker('Worker One (worker-1)');
+
+    const due = await screen.findByLabelText(/due back/i);
+    expect((due as HTMLInputElement).readOnly).toBe(false);
   });
 });

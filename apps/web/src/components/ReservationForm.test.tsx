@@ -19,6 +19,8 @@ const ASSETS = [
     currentHolderId: null,
     upcomingReservation: null,
     lastActivityAt: null,
+    dueAt: null,
+    isOverdue: false,
   },
   {
     _id: 'GRIND-002',
@@ -28,6 +30,8 @@ const ASSETS = [
     currentHolderId: null,
     upcomingReservation: null,
     lastActivityAt: null,
+    dueAt: null,
+    isOverdue: false,
   },
 ];
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { ApiError, apiFetch, newIdempotencyKey } from '../lib/api';
-import { formatOverlapMessage } from '../lib/format';
+import { formatConflictMessage } from '../lib/format';
 import { AssetSummary } from './StoreGrid';
 import { WorkerSummaryView } from '../lib/types';
 import { SearchableSelect, SearchableSelectOption } from './SearchableSelect';
@@ -83,7 +83,7 @@ export function ReservationForm({ onCreated }: { onCreated: () => void }) {
     } catch (err) {
       // An overlap conflict names the clashing window; the server can only express it in UTC,
       // so re-render it here in the keeper's own timezone.
-      const localised = err instanceof ApiError ? formatOverlapMessage(err.body) : null;
+      const localised = err instanceof ApiError ? formatConflictMessage(err.body) : null;
       setError(localised ?? (err instanceof Error ? err.message : 'Something went wrong'));
     } finally {
       setSubmitting(false);

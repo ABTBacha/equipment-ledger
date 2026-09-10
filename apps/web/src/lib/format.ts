@@ -23,3 +23,38 @@ export function formatOverlapMessage(body: Record<string, unknown> | undefined):
     conflict.endAt,
   )}`;
 }
+
+/**
+ * Rewrites the API's structured refusals in the viewer's local time. Every refusal that
+ * carries instants ships them as `conflict` data as well as interpolating UTC into
+ * `message`, because a store keeper cannot read `2026-09-11T17:00:00.000Z`.
+ *
+ * Returns null for anything unrecognised, so callers fall back to the server sentence
+ * rather than inventing one.
+ */
+export function formatConflictMessage(body: Record<string, unknown> | undefined): string | null {
+  const overlap = formatOverlapMessage(body);
+  if (overlap) return overlap;
+  if (!body) return null;
+
+  const conflict = body.conflict as Record<string, unknown> | undefined;
+  if (!conflict) return null;
+
+  if (body.code === 'ASSET_OUT_UNTIL' && isValidInstant(conflict.dueAt)) {
+    const holder = typeof conflict.workerId === 'string' ? conflict.workerId : 'somebody';
+    return `Already out with ${holder} until ${formatDateTime(conflict.dueAt)}`;
+  }
+
+  if (
+    body.code === 'RESERVED_FOR_ANOTHER_WORKER' &&
+    isValidInstant(conflict.startAt) &&
+    isValidInstant(conflict.endAt) &&
+    typeof conflict.workerId === 'string'
+  ) {
+    return `Reserved for ${conflict.workerId} from ${formatDateTime(conflict.startAt)} to ${formatDateTime(
+      conflict.endAt,
+    )}`;
+  }
+
+  return null;
+}

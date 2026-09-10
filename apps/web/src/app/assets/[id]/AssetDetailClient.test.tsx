@@ -38,6 +38,7 @@ const HISTORY: HistoryEntryView[] = [
       type: 'ISSUE',
       occurredAt: '2026-09-01T09:00:00.000Z',
       recordedAt: '2026-09-01T09:00:00.000Z',
+      dueAt: null,
       reason: null,
     },
     correction: null,
@@ -53,6 +54,7 @@ const RESERVATIONS: ReservationView[] = [
     endAt: '2027-01-10T17:00:00.000Z',
     status: 'ACTIVE',
     cancelReason: null,
+    fulfilledByMovementId: null,
   },
 ];
 

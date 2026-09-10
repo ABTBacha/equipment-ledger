@@ -46,6 +46,8 @@ describe('HistoryClient', () => {
             requiresCertification: null,
             upcomingReservation: { workerId: 'worker-1', startAt: new Date().toISOString() },
             lastActivityAt: new Date().toISOString(),
+            dueAt: null,
+            isOverdue: false,
           },
         ]);
       }
