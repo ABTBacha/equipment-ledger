@@ -120,7 +120,13 @@ npm run seed
 
 Deterministic and repeat-safe: it always drops and rebuilds the collections it owns, so running it twice never doubles the store, and the same command always produces the same story (which asset is out of service, which worker has an expired certification, which movement was corrected, and so on) — only the absolute timestamps shift to stay anchored around "now," so the seeded data, and the overdue and outstanding items in it, always looks current whenever you run it.
 
-The seeded store includes one asset deliberately out past its due-back time, alongside ordinary outstanding issues whose due times have not arrived yet, so the difference between "on loan" and "out too long" is visible on the dashboard without waiting for anything.
+What lands in the store: sixty assets across six kinds, two of which need a certification to hold (harnesses need `HEIGHTS`, gas detectors need `GAS-DETECT`), one of them out of service; twelve workers; roughly two hundred movements; and four bookings.
+
+The seeded store includes one asset deliberately out past its due-back time, alongside ordinary outstanding issues whose due times have not arrived yet, so the difference between "on loan" and "out too long" is visible on the dashboard without waiting for anything. Among the movements are also one logged hours after it happened and one corrected after the fact, so the two cases where the ledger disagrees with the clock — a late entry and a superseded entry — are both on screen from the first load.
+
+Traffic is spread across the thirty-day window rather than concentrated at its start: each asset's loans get their own slice of the window and land somewhere inside it. A loan runs at most eight hours against a slice of ten days at the narrowest, so the slices never overlap and an asset's movements stay in order. This matters more than it sounds — an earlier version advanced its cursor only by the length of each loan, which piled nine tenths of the ledger into the first four days and left the history screens empty for three weeks.
+
+Three of the twelve workers carry a certification worth looking at: one lapsed two months ago, one lapsed inside the window, and one is still valid today but expires ten days out. The first two make the refusal path reachable without editing data; the third is the case a keeper can act on now and be refused for next week.
 
 Bookings are built before movements, so the ordinary-traffic generator stays out of their windows — otherwise the seed produces exactly what the gating forbids, an asset issued to one worker inside another worker's booking. The four seeded bookings cover the four endings a booking can have: one still upcoming, one nobody collected, one collected and returned, and one collected and never brought back.
 
