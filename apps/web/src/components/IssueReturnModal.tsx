@@ -41,6 +41,14 @@ export function IssueReturnModal({
   }, []);
 
   const submit = async () => {
+    if (action === 'issue' && dueAt) {
+      const issuedAt = occurredAt ? new Date(occurredAt) : new Date();
+      if (new Date(dueAt).getTime() <= issuedAt.getTime()) {
+        setError('Due back must be after the time the asset went out.');
+        return;
+      }
+    }
+
     setSubmitting(true);
     setError(null);
     try {
@@ -84,8 +92,11 @@ export function IssueReturnModal({
             fieldBackground="bg-surface"
           />
         </div>
-        <label className="block text-sm mb-1 text-muted">Occurred at (leave blank for now)</label>
+        <label className="block text-sm mb-1 text-muted" htmlFor="occurred-at">
+          Occurred at (leave blank for now)
+        </label>
         <input
+          id="occurred-at"
           type="datetime-local"
           value={occurredAt}
           onChange={(e) => setOccurredAt(e.target.value)}
@@ -94,12 +105,18 @@ export function IssueReturnModal({
         />
         {action === 'issue' && (
           <>
+            {/*
+              A blank "occurred at" means now, which a browser picker cannot express as a
+              bound, so min only constrains the field once the keeper has named a time.
+              submit() covers both cases, and so does the API.
+            */}
             <label className="block text-sm mb-1 text-muted" htmlFor="due-at">
               Due back (optional)
             </label>
             <input
               id="due-at"
               type="datetime-local"
+              min={occurredAt || undefined}
               value={dueAt}
               onChange={(e) => setDueAt(e.target.value)}
               className="border border-hairline bg-surface px-3 py-2 w-full mb-3 text-primary"

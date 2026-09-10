@@ -37,6 +37,18 @@ export class MovementsService {
       throw new UnprocessableEntityException(certCheck.reason);
     }
 
+    // A due-back time at or before the moment of issue promises nothing a keeper could
+    // act on, and would read as instantly overdue. Checked here, before the transaction,
+    // because it depends only on the request.
+    if (dto.dueAt) {
+      const requestedDueAt = new Date(dto.dueAt);
+      if (requestedDueAt.getTime() <= occurredAt.getTime()) {
+        throw new UnprocessableEntityException(
+          `Due back ${requestedDueAt.toISOString()} is not after the issue at ${occurredAt.toISOString()}`,
+        );
+      }
+    }
+
     const { result } = await withIdempotency(this.movementModel, dto.idempotencyKey, () =>
       withRetries(() => this.executeIssue(dto, occurredAt)),
     );
@@ -85,7 +97,17 @@ export class MovementsService {
               { session, new: true },
             )
           : null;
-        const dueAt = dto.dueAt ? new Date(dto.dueAt) : fulfilledReservation?.endAt ?? null;
+        // A reservation whose window has already closed by the time the worker actually
+        // turns up is still the booking they came to collect against, but its end time is
+        // no longer a due-back time — so it supplies none, rather than one that would
+        // read as overdue the instant it was written. An explicit dueAt is validated in
+        // issue() above and always wins.
+        const derivedDueAt = fulfilledReservation?.endAt ?? null;
+        const dueAt = dto.dueAt
+          ? new Date(dto.dueAt)
+          : derivedDueAt && derivedDueAt.getTime() > occurredAt.getTime()
+            ? derivedDueAt
+            : null;
 
         const [movement] = await this.movementModel.create(
           [
@@ -282,6 +304,17 @@ export class MovementsService {
 
         if (dto.occurredAt) {
           await this.assertCorrectionKeepsLedgerOrder(original, new Date(dto.occurredAt), session);
+        }
+
+        // A correction can move the time of the issue, its due-back time, or both, so the
+        // rule is checked against the pair that results — not against whichever half the
+        // keeper happened to type. Same rule issue() enforces on the original write.
+        const effectiveOccurredAt = dto.occurredAt ? new Date(dto.occurredAt) : original.occurredAt;
+        const effectiveDueAt = dto.dueAt ? new Date(dto.dueAt) : original.dueAt ?? null;
+        if (effectiveDueAt && effectiveDueAt.getTime() <= effectiveOccurredAt.getTime()) {
+          throw new UnprocessableEntityException(
+            `Due back ${effectiveDueAt.toISOString()} is not after the issue at ${effectiveOccurredAt.toISOString()}`,
+          );
         }
 
         // Claim the correction atomically: the filter requires correctedBy to still be

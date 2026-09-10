@@ -53,6 +53,7 @@ export function HistoryTimeline({ entries, onCorrected }: { entries: HistoryEntr
             <CorrectMovementForm
               movementId={entry.movement._id}
               canCorrectDueAt={entry.movement.type === 'ISSUE'}
+              issuedAt={entry.correction?.occurredAt ?? entry.movement.occurredAt}
               onDone={() => {
                 setCorrectingId(null);
                 onCorrected();

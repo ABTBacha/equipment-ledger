@@ -46,4 +46,23 @@ describe('CorrectMovementForm', () => {
     renderForm();
     expect(screen.getByRole('button', { name: 'Save correction' })).toBeDisabled();
   });
+
+  it('refuses a corrected due-back time that lands before the issue, without calling the API', async () => {
+    render(
+      <ToastProvider>
+        <CorrectMovementForm
+          movementId="m1"
+          canCorrectDueAt
+          issuedAt="2026-08-01T09:00:00.000Z"
+          onDone={() => {}}
+        />
+      </ToastProvider>,
+    );
+
+    fireEvent.change(screen.getByLabelText(/corrected due back/i), { target: { value: '2026-08-01T08:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save correction' }));
+
+    expect(await screen.findByText(/due back must be after/i)).toBeInTheDocument();
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
 });

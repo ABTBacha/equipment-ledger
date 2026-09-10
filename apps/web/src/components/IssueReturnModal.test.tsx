@@ -171,4 +171,35 @@ describe('IssueReturnModal due-back time', () => {
 
     expect(screen.queryByLabelText(/due back/i)).not.toBeInTheDocument();
   });
+
+  it('refuses to submit a due-back time that is before the issue time, without calling the API', async () => {
+    const { queueSubmitResolve } = mockApiFetch();
+    queueSubmitResolve();
+
+    render(
+      <ToastProvider>
+        <IssueReturnModal asset={asset} action="issue" onClose={() => {}} />
+      </ToastProvider>,
+    );
+    await selectWorker('Worker One (worker-1)');
+
+    fireEvent.change(screen.getByLabelText(/occurred at/i), { target: { value: '2026-08-01T09:00' } });
+    fireEvent.change(screen.getByLabelText(/due back/i), { target: { value: '2026-08-01T08:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    expect(await screen.findByText(/due back must be after/i)).toBeInTheDocument();
+    expect((apiFetch as jest.Mock).mock.calls.filter(([path]) => path === '/movements/issue')).toHaveLength(0);
+  });
+
+  it('stops the due-back picker from offering a time before the issue time', async () => {
+    mockApiFetch();
+    render(
+      <ToastProvider>
+        <IssueReturnModal asset={asset} action="issue" onClose={() => {}} />
+      </ToastProvider>,
+    );
+
+    fireEvent.change(screen.getByLabelText(/occurred at/i), { target: { value: '2026-08-01T09:00' } });
+    expect(screen.getByLabelText(/due back/i)).toHaveAttribute('min', '2026-08-01T09:00');
+  });
 });

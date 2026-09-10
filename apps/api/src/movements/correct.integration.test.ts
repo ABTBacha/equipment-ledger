@@ -284,5 +284,58 @@ describe('MovementsService.correct', () => {
 
       expect(new Date(correction.dueAt!).toISOString()).toBe('2026-08-01T12:00:00.000Z');
     });
+
+    it('refuses to correct a due-back time to before the issue it belongs to', async () => {
+      const issue = await service.issue({
+        assetId: 'DRILL-001',
+        workerId: 'worker-1',
+        occurredAt: '2026-08-01T09:00:00Z',
+        dueAt: '2026-08-01T12:00:00Z',
+        idempotencyKey: 'due-corr-issue-3',
+      });
+
+      await expect(
+        service.correct(String(issue._id), {
+          dueAt: '2026-08-01T08:00:00Z',
+          idempotencyKey: 'due-corr-3',
+        }),
+      ).rejects.toThrow(/due back/i);
+    });
+
+    it('refuses a correction that moves the issue time past its own due-back time', async () => {
+      const issue = await service.issue({
+        assetId: 'DRILL-001',
+        workerId: 'worker-1',
+        occurredAt: '2026-08-01T09:00:00Z',
+        dueAt: '2026-08-01T12:00:00Z',
+        idempotencyKey: 'due-corr-issue-4',
+      });
+
+      await expect(
+        service.correct(String(issue._id), {
+          occurredAt: '2026-08-01T13:00:00Z',
+          idempotencyKey: 'due-corr-4',
+        }),
+      ).rejects.toThrow(/due back/i);
+    });
+
+    it('accepts a correction that moves both the issue time and its due-back time together', async () => {
+      const issue = await service.issue({
+        assetId: 'DRILL-001',
+        workerId: 'worker-1',
+        occurredAt: '2026-08-01T09:00:00Z',
+        dueAt: '2026-08-01T12:00:00Z',
+        idempotencyKey: 'due-corr-issue-5',
+      });
+
+      const correction = await service.correct(String(issue._id), {
+        occurredAt: '2026-08-01T13:00:00Z',
+        dueAt: '2026-08-01T18:00:00Z',
+        idempotencyKey: 'due-corr-5',
+      });
+
+      expect(new Date(correction.occurredAt).toISOString()).toBe('2026-08-01T13:00:00.000Z');
+      expect(new Date(correction.dueAt!).toISOString()).toBe('2026-08-01T18:00:00.000Z');
+    });
   });
 });

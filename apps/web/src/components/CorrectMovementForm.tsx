@@ -4,14 +4,26 @@ import { useState } from 'react';
 import { apiFetch, getCurrentKeeper, newIdempotencyKey } from '../lib/api';
 import { useToast } from './ToastProvider';
 
+/** An ISO instant as the local-time string a datetime-local input understands. */
+function toPickerValue(iso: string | undefined): string | undefined {
+  if (!iso) return undefined;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return undefined;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export function CorrectMovementForm({
   movementId,
   canCorrectDueAt = false,
+  issuedAt,
   onDone,
 }: {
   movementId: string;
   /** Only an ISSUE has a due-back time to correct. */
   canCorrectDueAt?: boolean;
+  /** The movement's own occurredAt, which a corrected due-back time has to stay after. */
+  issuedAt?: string;
   onDone: () => void;
 }) {
   const { showToast } = useToast();
@@ -23,6 +35,12 @@ export function CorrectMovementForm({
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
+    const effectiveIssuedAt = occurredAt || issuedAt;
+    if (dueAt && effectiveIssuedAt && new Date(dueAt).getTime() <= new Date(effectiveIssuedAt).getTime()) {
+      setError('Due back must be after the time the asset went out.');
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
     try {
@@ -65,6 +83,7 @@ export function CorrectMovementForm({
           <input
             id={`corrected-due-${movementId}`}
             type="datetime-local"
+            min={occurredAt || toPickerValue(issuedAt)}
             value={dueAt}
             onChange={(e) => setDueAt(e.target.value)}
             className="border border-hairline bg-raised px-2 py-1 mb-2 w-full text-primary"
